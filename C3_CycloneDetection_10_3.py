@@ -40,11 +40,11 @@ Set up Environment
 *******************************************'''
 print "Setting up environment."
 ra = "ERA"
-path = "/VOLUMES/Horatio"
-inpath = path+"/"+ra+"/SLP/SLP_EASE100000/Value" # path+"/ArcticCyclone/SLP_EASE100000/Value" #
-#inpath2 = path+"/"+ra+"/Precip"
-outpath = path+"/ArcticCyclone/detection10_10E"
-suppath = path+"/"+ra+"/"+ra+"_Support"
+path = "$INSERT PATH HERE$/Version10_3/Test Data/"
+inpath = path+"/ERA_SLP_100km"
+#inpath2 = path+"/Precip"
+outpath = path+"/Results"
+suppath = path
 
 '''********************
 Define Variables

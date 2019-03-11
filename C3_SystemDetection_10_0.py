@@ -31,8 +31,8 @@ Set up Environment
 print "Setting up environment."
 BBox = "" # use "" if performing on all cyclones
 
-path = "F:/GISDATA"
-inpath = path+"/ArcticCyclone/detection10_10E/"+BBox
+path = "$INSERT PATH HERE$/Version10_3/Test Data"
+inpath = path+"/Results"
 outpath = inpath
 
 '''*******************************************
@@ -50,7 +50,7 @@ time2 = [2016,9,1,0,0,0] # stop BEFORE this time (exclusive)
 monthstep = [0,1,0,0,0,0] # A Time step that increases by 1 mont [Y,M,D,H,M,S]
 
 dateref = [1900,1,1,0,0,0] # [Y,M,D,H,M,S]
-starttime = [1979,1,1,0,0,0] # [Y,M,D,H,M,S]... starttime for the cyclone detection script
+starttime = [2016,8,1,0,0,0] # [Y,M,D,H,M,S]... starttime for the cyclone detection script
 
 months = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"]
 mons = ["01","02","03","04","05","06","07","08","09","10","11","12"]

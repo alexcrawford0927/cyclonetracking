@@ -1225,14 +1225,17 @@ def slope(field):
 '''###########################
 Calculate Sobel Laplacian of Field
 ###########################'''
-def laplacian(field):
+def laplacian(field,multiplier=1):
     '''Given a field, this function calculates the Laplacian (the field's 
     second derivative over two dimensions). The gradient is calculated using a 
     Sobel operator, so edge effects do exist. Following the method of Murray 
     and Simmonds (1991), the second derivative is first calculated for the x 
     and y orthognoal components individally and then combined.
     
-    field = a numpy array of values over which to take the Laplacian
+    field = a numpy array of values over which to take the Laplacian\n
+    multiplier (optional) = an optional multiplier for converting units at the
+    end of the calculation.  For example to convert from Pa/[100 km]^2 to 
+    hPa/[100 km]^2, use 0.01.  The default is 1.
     '''
     # Introduce empty arrays:
     slopeX = np.zeros(field.shape, dtype=float)
@@ -1270,10 +1273,9 @@ def laplacian(field):
             except:
                 laplacY[row,col] = np.nan
     
-    #laplac = (laplacX**2. + laplacY**2.)**0.5
     laplac = laplacX + laplacY
 
-    return laplac
+    return laplac*multiplier
 
 '''###########################
 Detect Minima/Maxima of a Surface
@@ -3150,7 +3152,7 @@ def comparetracks(trs1,trs2,trs2b,date1,refdate=[1900,1,1,0,0,0],minmatch=0.6,ma
                 # Find average intensity differences
                 areaDiff = np.mean([int(trs1[i1].data.area[trs1[i1].data.time == tmb]) - int(trs2b[im].data.area[trs2b[im].data.time == tmb]) for tmb in timesmb])
                 pcentDiff = np.mean([int(trs1[i1].data.p_cent[trs1[i1].data.time == tmb]) - int(trs2b[im].data.p_cent[trs2b[im].data.time == tmb]) for tmb in timesmb])
-                dsqpDiff = np.nanmean([float(trs1[i1].data.DsqP[trs1[i1].data.time == tmb]) - float(trs2b[im].data.DsqP[trs2b[im].data.time == tmb]) for tmb in timesmb])
+                dsqpDiff = np.mean([int(trs1[i1].data.DsqP[trs1[i1].data.time == tmb]) - int(trs2b[im].data.DsqP[trs2b[im].data.time == tmb]) for tmb in timesmb])
                 depthDiff = np.mean([int(trs1[i1].data.depth[trs1[i1].data.time == tmb]) - int(trs2b[im].data.depth[trs2b[im].data.time == tmb]) for tmb in timesmb])
                 
                 pdf = pdf.append(pd.DataFrame([{"Year1":date1[0],"Month1":date1[1],"sid1":trs1[i1].sid,"Num_Matches":nummatch,"Year2":timeb[0],"Month2":timeb[1],"sid2":trs2b[im].sid,\
@@ -3163,7 +3165,7 @@ def comparetracks(trs1,trs2,trs2b,date1,refdate=[1900,1,1,0,0,0],minmatch=0.6,ma
                 # Find average intensity differences
                 areaDiff = np.mean([int(trs1[i1].data.area[trs1[i1].data.time == tm]) - int(trs2[im].data.area[trs2[im].data.time == tm]) for tm in timesm])
                 pcentDiff = np.mean([int(trs1[i1].data.p_cent[trs1[i1].data.time == tm]) - int(trs2[im].data.p_cent[trs2[im].data.time == tm]) for tm in timesm])
-                dsqpDiff = np.nanmean([float(trs1[i1].data.DsqP[trs1[i1].data.time == tm]) - float(trs2[im].data.DsqP[trs2[im].data.time == tm]) for tm in timesm])
+                dsqpDiff = np.mean([int(trs1[i1].data.DsqP[trs1[i1].data.time == tm]) - int(trs2[im].data.DsqP[trs2[im].data.time == tm]) for tm in timesm])
                 depthDiff = np.mean([int(trs1[i1].data.depth[trs1[i1].data.time == tm]) - int(trs2[im].data.depth[trs2[im].data.time == tm]) for tm in timesm])
                 
                 pdf = pdf.append(pd.DataFrame([{"Year1":date1[0],"Month1":date1[1],"sid1":trs1[i1].sid,"Num_Matches":nummatch,"Year2":date1[0],"Month2":date1[1],"sid2":trs2[im].sid,\
