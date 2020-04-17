@@ -3,6 +3,7 @@ Author: Alex Crawford
 Date Created: 20 Jan 2015
 Date Modified: 21 Jun 2018 -> Added automatic folder creation for outputs
     4 Jun 2019 -> Updated for Python 3
+    17 Apr 2020 --> Typo fixed
 Purpose: Given a series of sea level pressure fields in netcdf files, this 
     script performs several steps:
     1) Identify closed low pressure centers at each time step
@@ -40,15 +41,14 @@ import CycloneModule_11_1 as md
 Set up Environment
 *******************************************'''
 print("Setting up environment.")
-path = "/Volumes/Ferdinand/Cyclones/Algorithm Sharing/Version11_1/Test Data"
-ra = "ERA"
-verd = "11" # Detection Version
-vert = "1E" # Tracking Version
-inpath = path+"/"+ra+"_SLP_100km" # path+"/"+ra+"/SLP/SLP_EASE100km/Value" # 
+path = "/Volumes/Ferdinand"
+ra = "MERRA2"
+verd = "11_3" # Detection Version
+vert = "CM2" # Tracking Version
+inpath = path+"/"+ra+"/SLP/SLP_EASE100km/Value" # path+"/ArcticCyclone/SLP_EASE100000/Value" #
 #inpath2 = path+"/"+ra+"/Precip"
 #inpath3 = path+"/"+ra+"/svp/svpratio_EASE"
-suppath = path
-outpath = path+"/Results"
+suppath = "/Volumes/Ferdinand/Projections"
 
 '''********************
 Define Variables
@@ -67,9 +67,9 @@ yDistN = "EASE2_N0_100km_yDistance"+ext
 reffile = latsN
 
 # Time Variables 
-starttime = [2016,8,1,0,0,0] # Format: [Y,M,D,H,M,S]
-endtime = [2016,9,1,0,0,0] # stop BEFORE this time (exclusive)
-timestep = [0,0,0,6,0,0] # Time step in [Y,M,D,H,M,S]
+starttime = [1980,1,1,0,0,0] # Format: [Y,M,D,H,M,S]
+endtime = [2019,1,1,0,0,0] # stop BEFORE this time (exclusive)
+timestep = [0,0,0,1,0,0] # Time step in [Y,M,D,H,M,S]
 
 dateref = [1900,1,1,0,0,0]  # [Y,M,D,H,M,S]
 
@@ -144,8 +144,8 @@ Main Analysis
 print("Main Analysis")
 
 # Ensure that folders exist to store outputs
-detpath = outpath+"/detection"+verd
-trkpath = outpath+"/tracking"+verd+"_"+vert
+detpath = path+"/ArcticCyclone/detection"+verd
+trkpath = path+"/ArcticCyclone/detection"+verd+vert
 
 for y in range(starttime[0],endtime[0]+1):
     Y = str(y)
@@ -184,7 +184,7 @@ lats = gdalnumeric.LoadFile(suppath+"/"+latsN)#[1:-1,1:-1]
 longs = gdalnumeric.LoadFile(suppath+"/"+longsN)#[1:-1,1:-1]
 yDist = gdalnumeric.LoadFile(suppath+"/"+yDistN)
 xDist = gdalnumeric.LoadFile(suppath+"/"+xDistN)
-elev = gdalnumeric.LoadFile(suppath+"/"+demN)#[1:-1,1:-1]
+elev = gdalnumeric.LoadFile(path+"/DEMs/"+demN)#[1:-1,1:-1]
 fieldElevMask = np.where(elev > max_elev,np.nan,0)
 
 # Set up minimum precip
@@ -253,7 +253,7 @@ while t != endtime:
         
         # Load cyclone tracks and cyclone field from prior time step
         ct = pd.read_pickle(trkpath+"/ActiveTracks/"+str(tp[0])+"/activetracks"+str(tp[0])+str(mons[tp[1]-1])+".pkl")
-        cf1 = pd.read_pickle(trkpath+"/CycloneFields/"+str(tp[0])+"/"+str(months[tp[1]-1])+"/"+cffilep)
+        cf1 = pd.read_pickle(detpath+"/CycloneFields/"+str(tp[0])+"/"+str(months[tp[1]-1])+"/"+cffilep)
         md.realignPriorTID(ct,cf1)
         
         # move into normal tracking
