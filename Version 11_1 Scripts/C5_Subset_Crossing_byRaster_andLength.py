@@ -2,6 +2,7 @@
 Author: Alex Crawford
 Date Created: 28 Jul 2015
 Date Modified: 12 Jun 2019 --> Modified for Python 3
+                18 May 2020 --> Added more Parameterization
 Purpose: Identify tracks that spend any point of their lifetime within a 
 bounding box defined by a list of (long,lat) ordered pairs in a csv file.
 
@@ -30,17 +31,17 @@ import os
 '''*******************************************
 Set up Environment
 *******************************************'''
-path = "/Volumes/Ferdinand/Cyclones/Algorithm Sharing/Version11_1/Test Data"
-inpath = path+"/Results/tracking11_1E"
+path = "/Volumes/Ferdinand"
+inpath = path+"/ArcticCyclone/detection11_3CM2"
 outpath = inpath
 
 '''*******************************************
 Define Variables
 *******************************************'''
 # File Variables
-typ = "System" # Cyclone, System, or Active
+typ = "Cyclone" # Cyclone, System, or Active
 
-bboxName = path+"/EASE2_N0_100km_etopo1.tif"
+bboxName = path+"/DEMs/EASE2_N0_100km_etopo1.tif"
 bboxmin = -100000
 bboxmax = 500
 values = [1]
@@ -49,8 +50,8 @@ bboxnum = "16"
 bboxmain = "" # The main bbox your subsetting from; usually "" for "all cyclones", otherwise BBox##
 
 # Time Variables 
-starttime = [2016,8,1,0,0,0] # Format: [Y,M,D,H,M,S]
-endtime = [2016,9,1,0,0,0] # stop BEFORE this time (exclusive)
+starttime = [1980,1,1,0,0,0] # Format: [Y,M,D,H,M,S]
+endtime = [2019,1,1,0,0,0] # stop BEFORE this time (exclusive)
 monthstep = [0,1,0,0,0,0] # A Time step that increases by 1 mont [Y,M,D,H,M,S]
 
 dateref = [1900,1,1,0,0,0] # [Y,M,D,H,M,S]
@@ -66,9 +67,15 @@ Main Analysis
 *******************************************'''
 print("Main Analysis")
 # Load Mask
-bbox = gdalnumeric.LoadFile(path+"/EASE2_N0_100km_etopo1.tif")
+bbox = gdalnumeric.LoadFile(path+"/DEMs/EASE2_N0_100km_etopo1.tif")
 mask = np.where((bbox >= bboxmin) & (bbox <= bboxmax), 1, 0)
 
+try:
+    os.chdir(inpath+"/BBox"+bboxnum)
+except:
+    os.mkdir(inpath+"/BBox"+bboxnum)
+    os.chdir(inpath+"/BBox"+bboxnum)
+    
 try:
     os.chdir(inpath+"/BBox"+bboxnum+"/"+typ+"Tracks")
 except:
