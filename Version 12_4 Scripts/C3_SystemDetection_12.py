@@ -24,7 +24,7 @@ start = perf_counter()
 
 print("Loading modules.")
 import pandas as pd
-import CycloneModule_12_2 as md
+import CycloneModule_12_4 as md
 
 '''*******************************************
 Set up Environment
@@ -32,7 +32,7 @@ Set up Environment
 print("Setting up environment.")
 BBox = "" # use "" if performing on all cyclones
 
-inpath = "/Volumes/Cressida/CycloneTracking/tracking12_7E5G/"+BBox
+inpath = "/Volumes/Cressida/CycloneTracking/tracking12_4E5P/"+BBox
 outpath = inpath
 
 '''*******************************************
@@ -46,8 +46,8 @@ rg = 1
 
 # Time Variables
 starttime = [1979,1,1,0,0,0] # Format: [Y,M,D,H,M,S]
-endtime = [2020,1,1,0,0,0] # stop BEFORE this time (exclusive)
-reftime = starttime #[1979,1,1,0,0,0]
+endtime = [1979,2,1,0,0,0] # stop BEFORE this time (exclusive)
+reftime = [1979,1,1,0,0,0]
 monthstep = [0,1,0,0,0,0] # A Time step that increases by 1 month [Y,M,D,H,M,S]
 
 dateref = [1900,1,1,0,0,0] # [Y,M,D,H,M,S]

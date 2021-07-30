@@ -16,8 +16,8 @@ print("Loading modules.")
 import os
 import numpy as np
 from netCDF4 import Dataset
-from mpl_toolkits.basemap import Basemap
-import CycloneModule_11_1 as md
+import xesmf as xe
+import CycloneModule_12_2 as md
 
 '''********************
 Define Variables
@@ -33,8 +33,8 @@ nctvar = "time"
 ncext = '.nc'
 
 # Time Variables
-ymin, ymax = 2002, 2019
-mmin, mmax = 1, 12
+ymin, ymax = 2020, 2020
+mmin, mmax = 12, 12
 dmin, dmax = 1, 31 
 
 mons = ["01","02","03","04","05","06","07","08","09","10","11","12"]
@@ -43,16 +43,13 @@ timestep = 1 # in hours
 startdate = [1900,1,1] # The starting date for the reanalysis time steps
 
 # Inputs for reprojection
-bb = [-89.99,-45,-89.99,135] # in degrees [ll lat, ll lon, ur lat, ur lon]
-xsize, ysize = 25000, -25000 # in meters
-nx, ny = 720, 720 # number of grid cells
-lon_0 = 0 # Central Meridian (which longitude is at the 6 o'clock position)
-lat_0 = 90 # Reference Latitude (center of projection)
+xsize, ysize = 50000, -50000 # in meters
+nx, ny = 360, 360 # number of grid cells; use 180 by 180 for 100 km grid
 
 # Path Variables
 path = "/Volumes/Cressida"
-inpath = path+"/"+ra+"/"+var
-outpath = path+"/"+ra+"/"+var+"_EASE2_N0_"+str(int(xsize/1000))+"km"
+inpath = path+"/"+ra+"/"+var # path+"/"+ra+"/"+var+"_T319" # 
+outpath = "/Volumes/Cressida/"+ra+"/"+var+"_EASE2_N0_"+str(int(xsize/1000))+"km" # path+"/"+ra+"/"+var+"_T319_EASE2_N0_"+str(int(xsize/1000))+"km" # 
 suppath = path+"/Projections"
 
 '''*******************************************
@@ -63,7 +60,7 @@ print("Main Analysis")
 # Obtain list of nc files:
 os.chdir(outpath)
 fileList = os.listdir(inpath)
-fileList = [f for f in fileList if f.endswith(ncext)]
+fileList = [f for f in fileList if (f.endswith(ncext) & f.startswith(ra))]
 
 # Identify the time steps:
 ref_netcdf = Dataset(inpath+"/"+fileList[-1])
@@ -72,12 +69,20 @@ ref_netcdf = Dataset(inpath+"/"+fileList[-1])
 lons = ref_netcdf.variables['longitude'][:]
 lats = ref_netcdf.variables['latitude'][:]
 
+outprjnc = Dataset(suppath+'/EASE2_N0_'+str(int(xsize/1000))+'km_Projection.nc')
+outlat = outprjnc['lat'][:].data
+outlon = outprjnc['lon'][:].data
+
 # Close reference netcdf:
 ref_netcdf.close()
 
-# Set up the map for reprojecting
-mp = Basemap(projection='laea',lat_0=lat_0,lon_0=lon_0,\
-    llcrnrlat=bb[0], llcrnrlon=bb[1],urcrnrlat=bb[2], urcrnrlon=bb[3],resolution='c')
+# Define Grids as Dictionaries
+grid_in = {'lon': lons, 'lat': lats}
+
+grid_out = {'lon': outlon, 'lat': outlat}
+
+# Create Regridder
+regridder = xe.Regridder(grid_in, grid_out, 'bilinear')
 
 print("Step 2. Set up dates of analysis")
 years = range(ymin,ymax+1)
@@ -98,10 +103,10 @@ for y in years:
         ncList = [f for f in fileList if Y+M in f]
     
         if len(ncList) > 1:
-            print("Multiple files with the date " + Y + " -- skipping.")
+            print("Multiple files with the date " + Y+M + " -- skipping.")
             continue
         if len(ncList) == 0:
-            print("No files with the date " + Y + " -- skipping.")
+            print("No files with the date " + Y+M + " -- skipping.")
         else:
             nc = Dataset(inpath+"/"+ncList[0])
             tlist = nc.variables[nctvar][:]
@@ -128,8 +133,8 @@ for y in years:
                     inArr = nc.variables[ncvar][np.where(tlist == timeH)[0][0],:,:]
                     
                     # Transform data
-                    outArr, xs, ys = mp.transform_scalar(np.flipud(inArr),lons,np.flipud(lats),nx,ny,returnxy=True)
-                    
+                    outArr = regridder(inArr)
+                                        
                     # Add to list
                     mlist.append(outArr)
                     hlist.append(timeH)
@@ -140,7 +145,6 @@ for y in years:
         for the EASE2 projection (Lambert Azimuthal Equal Area;\
         lat-origin = 90°N, lon-origin=0°, # cols = ' + str(nx) + ',\
         # rows = ' + str(ny) + ', dx = ' + str(xsize) + ', dy = ' + str(ysize) + ', units = meters'
-        ncf.history = 'Created ' + time.ctime(time.time())
         ncf.source = 'netCDF4 python module'
         
         ncf.createDimension('time', len(mlist))
@@ -151,7 +155,11 @@ for y in years:
         ncfy = ncf.createVariable('y', np.float64, ('y',))
         ncfArr = ncf.createVariable(ncvar, np.float64, ('time','y','x'))
         
-        ncft.units = nc.variables[nctvar].units
+        try:
+            ncft.units = nc.variables[nctvar].units
+        except:
+            ncft.units = 'hours since 1900-01-01 00:00:00.0'
+        
         ncfx.units = 'm'
         ncfy.units = 'm'
         ncfArr.units = 'Pa'

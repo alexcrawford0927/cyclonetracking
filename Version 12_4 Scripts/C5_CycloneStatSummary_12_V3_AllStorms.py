@@ -5,6 +5,7 @@ Date Modified: 21 Jun 2018 -> Switch to iloc, loc method of subsetting
 12 Jun 2019 --> Update for Python 3
 19 May 2020 --> Added automatic creation of output directory
 02 Jul 2020 --> Removed reliance on GDAL; using regions stored in netcdf file
+21 Jan 2021 --> Added dispalcement as subset option; added genesis/lysis region check
 Purpose: Records information that summarizes each track (e.g., length, lifespan, 
 region of origin, number of merges and splits).
 '''
@@ -17,15 +18,20 @@ Import Modules
 import pandas as pd
 import os
 import numpy as np
-import CycloneModule_12_2 as md
+import CycloneModule_12_4 as md
+
+def maxDistFromGenPnt(data):        
+    v = np.max([md.haversine(data.lat[0],data.lat[i],data.long[0],data.long[i]) for i in range(len(data.long))])
+    return v/1000
 
 '''*******************************************
 Set up Environment
 *******************************************'''
-BBoxNum = "BBox15" # Use "BBox##" or "" if no subset
+BBoxNum = "" # Use "BBox##" or "" if no subset
 path = "/Volumes/Cressida"
-version = "12_4E5R"
+version = "12_4E5P"
 inpath = path+"/CycloneTracking/tracking"+version+"/"+BBoxNum
+regpath = path+"/Projections/EASE2_N0_25km_GenesisRegions.pkl"
 
 '''*******************************************
 Define Variables
@@ -37,12 +43,13 @@ kind = kind1+"Tracks" # Can be AFZ, Arctic, or other region (or no region), foll
 
 rg = 1 # Whether regenesis of a cyclone counts as a track split (0) or track continuation (1)
 
-V = "_N60" # An optional version name; I suggest you start with "_" or "-" to separate from years in file title
+V = "_GenReg" # An optional version name; suggested to start with "_" or "-" to separate from years in file title
 
 # Aggregation Parameters
-minls = 0 # minimum lifespan (in  days) for a track to be considered
-mintl = 0 # minimum track length (in km)
-minlat = 60 # minimum latitude
+minls = 1 # minimum lifespan (in  days) for a track to be considered
+mintl = 1000 # minimum track length (in km)
+mindisp = 0
+minlat = 0 # minimum latitude
 
 # Time Variables 
 starttime = [1979,1,1,0,0,0] # Format: [Y,M,D,H,M,S]
@@ -58,6 +65,9 @@ mons = ["01","02","03","04","05","06","07","08","09","10","11","12"]
 Main Analysis
 *******************************************'''
 print("Main Analysis")
+# Load Regions
+regs = pd.read_pickle(regpath)
+
 # Prep empty pdf
 pdf = pd.DataFrame()
 
@@ -90,9 +100,9 @@ while mt != endtime:
             cs2 = []
     
     # Limit to tracks that satisfy minimum lifespan and track length
-    trs = [c for c in cs if ((c.lifespan() >= minls) and (c.trackLength() >= mintl) and (np.max(c.data.lat) >= minlat))]
-    trs0 = [c for c in cs0 if ((c.lifespan() >= minls) and (c.trackLength() >= mintl) and (np.max(c.data.lat) >= minlat))]
-    trs2 = [c for c in cs2 if ((c.lifespan() >= minls) and (c.trackLength() >= mintl) and (np.max(c.data.lat) >= minlat))]
+    trs = [c for c in cs if ((c.lifespan() > minls) and (c.trackLength() >= mintl) and (np.max(c.data.lat) >= minlat) and (maxDistFromGenPnt(c.data) >= mindisp))]
+    trs0 = [c for c in cs0 if ((c.lifespan() > minls) and (c.trackLength() >= mintl) and (np.max(c.data.lat) >= minlat) and (maxDistFromGenPnt(c.data) >= mindisp))]
+    trs2 = [c for c in cs2 if ((c.lifespan() > minls) and (c.trackLength() >= mintl) and (np.max(c.data.lat) >= minlat) and (maxDistFromGenPnt(c.data) >= mindisp))]
     
     ### EVENT FIELDS ###
     # Limit events to only those tracks that satisfy above criteria
@@ -146,12 +156,14 @@ while mt != endtime:
                     elif tr.events.Etype.iloc[e] == 3:
                         spl3_count =  spl3_count + 3
         
-        row = pd.DataFrame([{"tid":tr.tid,"year":mt[0],"month":mt[1],"avguv":tr.data.uv.mean(),\
+        row = pd.DataFrame([{"sid":tr.sid,"year":mt[0],"month":mt[1],"avguv":tr.data.uv.mean(),\
         "maxdsqp":tr.data.DsqP.max(),"minp":tr.data.p_cent.min(),"maxdepth":tr.data.depth.max(),\
         "avgdsqp":tr.data.DsqP.mean(),"avgp":tr.data.p_cent.mean(),"avgdepth":tr.data.depth.mean(),\
         "lifespan":tr.lifespan(),"trlen":tr.trackLength(),"avgarea":tr.avgArea(),\
         "mcc":tr.mcc(),"spl1":spl1_count,"spl2":spl2_count,"spl3":spl3_count,\
-        "mrg1":mrg1_count,"mrg2":mrg2_count,"mrg3":mrg3_count,"rge2":rge2_count},])
+        "mrg1":mrg1_count,"mrg2":mrg2_count,"mrg3":mrg3_count,"rge2":rge2_count,\
+        "genReg":regs[list(tr.data.loc[tr.data.type > 0,'y'])[0],list(tr.data.loc[tr.data.type > 0,'x'])[0]],\
+        "lysReg":regs[list(tr.data.y)[-1],list(tr.data.x)[-1]]},])
         pdf = pdf.append(row,ignore_index=True,sort=False)
     
     mt = md.timeAdd(mt,monthstep)

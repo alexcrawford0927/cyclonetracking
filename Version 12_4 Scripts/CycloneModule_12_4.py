@@ -1,18 +1,49 @@
 '''
-Author: Alex Crawford
-Date Created: 20 Jan 2015
-Date Modified: 4 Jun 2019 --> Update to Python 3
-
-This module contains the classes and functions used for a cyclone detection 
-and tracking algorithm (the C3_CycloneDetection scripts).
+Main Author: Alex Crawford
+Contributions from: Mark Serreze, Nathan Sommer
+Date Created: 20 Jan 2015 (original module)
+Modifications: (since branch from version 11)
+21 May 2020 --> Improved speed of kernelgradient function (courtesy Nathan Sommer) & laplacian function 
+02 Jun 2020 --> Made test for weak minima mandatory during cyclone detection (removing an if statement)
+            --> Re-ordered the unit conversions in the haversine formula to prioritize m and km
+17 Jun 2020 --> Modified how the area mechanism for single-center cyclones works to make 
+                it fewer lines of code but the same number of steps
+            --> Minor tweak in cTrack2sTrack function so that pandas data.frame row 
+                is pulled out as its own dataframe instead of always being subset
+11 Sep 2020 --> Pulled the "maxdist" calculation out of the module and into the top-level
+                script because it really only needs to be done once
+            --> Changed method of determining track continuation during merges to 
+                prioritize nearest neighbor, but then maximum depth (instead of lifespan)
+02 Oct 2020 --> Changed the findAreas method of cyclonefield objects so that
+                the fieldCenters is replaced instead of duplicated when distinguishing 
+                primary and secondary centers. Also made area and center fields the uint8 data type.
+                This greatly reduces the file size of detection outputs.
+05 Oct 2020 --> Changed the parent track id assignment during area merges to also 
+                prioritize depth instead of lifespan
+            --> Added try/except statements to the cTrack2sTrack function so that it will ignore
+                cases where tids between two months don't align insted of breaking.
+Start Version 12_4 (Branch from 12_2)
+13 Jan 2021 --> Removed the columns precip, preciparea, and DpDr from the standard cyclone dataframe output
+                (saving space) and added a method for cyclone tracks to calculate the maximum distance
+                from the genesis point that the cyclone is ever observed.
+14 Jan 2021 --> Switch in when NaNs are counted, allowing minima over masked areas to interfere with nearby minima
+            --> Removed an if statement from "findCenters" that I never actually use 
+            (there is always an intensity threshold)
+23 Mar 2021 --> Added rotateCoordsAroundOrigin function
+15 Apr 2021 --> Modified the findCAP function to work as a post-hoc analysis
+28 Apr 2021 --> Add linear regression function
+05 May 2021 --> Remove "columns=" statements from initiation of empty pandas dataframes
+29 May 2021 --> Fixed bug in linear regression function
 '''
-__version__ = "11.1"
+__version__ = "12.4"
 
 import pandas as pd
 import copy
 import numpy as np
-from osgeo import gdal, gdalconst, gdalnumeric
-import scipy.ndimage.measurements
+from scipy.spatial.distance import cdist
+# from osgeo import gdal, gdalconst, gdalnumeric
+from scipy import ndimage
+from scipy import stats
 
 '''
 ###############
@@ -49,7 +80,7 @@ class minimum:
         self.precip = 0
         self.precipArea = 0
     def radius(self):
-        return (self.area/(np.pi))**0.5
+        return np.sqrt(self.area/(np.pi))
     def depth(self):
         return self.p_edge-self.p_cent
     def Dp(self):
@@ -90,11 +121,11 @@ class cyclonefield:
     #############################
     # Cyclone Centers Detection #
     #############################
-    def findMinima(self, fieldMask, kSize, nanthreshold=0.5):
+    def findMinima(self, field, mask, kSize, nanthreshold=0.5):
         '''Identifies minima in the field using limits and kSize.
         '''
-        self.fieldMinima = detectMinima(fieldMask,kSize,nanthreshold).astype(np.int)
-    def findCenters(self, field, fieldMask, kSize, nanthreshold, d_slp, d_dist, yDist, xDist, lats, lons):
+        self.fieldMinima = detectMinima(field,mask,kSize,nanthreshold).astype(np.int)
+    def findCenters(self, field, mask, kSize, nanthreshold, d_slp, d_dist, yDist, xDist, lats, lons):
         '''Uses the initialization parameters to identify potential cyclones
         centers. Identification begins with finding minimum values in the field
         and then uses a gradient parameter and elevation parameter to restrict
@@ -106,10 +137,10 @@ class cyclonefield:
         laplac = laplacian(field)        
         
         # STEP 2: Identify Centers
-        self.fieldCenters = findCenters(fieldMask, kSize, nanthreshold, d_slp, d_dist, yDist, xDist)
+        self.fieldCenters = findCenters(field, mask, kSize, nanthreshold, d_slp, d_dist, yDist, xDist)
         
         # Identify center locations
-        rows, cols = np.where(self.fieldCenters == 1)
+        rows, cols = np.where(self.fieldCenters > 0)
         
         # STEP 3: Assign each as a minimum in the centers list:
         for c in range(np.sum(self.fieldCenters)):
@@ -124,26 +155,17 @@ class cyclonefield:
     ###############################
     def findAreas(self, fieldMask, contint, mcctol, mccdist, lats, lons, kSize):
         # Identify maxima
-        maxes = detectMaxima(fieldMask,kSize)
+        maxes = detectMaxima(fieldMask,fieldMask,kSize)
         
         # Define Areas, Identify Primary v. Secondary Cyclones
-        self.fieldAreas, self.fieldCenters2, self.cyclones = \
+        self.fieldAreas, self.fieldCenters, self.cyclones = \
             findAreas(fieldMask, self.fieldCenters, self.cyclones,\
             contint, mcctol, mccdist, lats, lons, maxes)
         
         # Identify area id for each center
-        cAreas, nC = scipy.ndimage.measurements.label(self.fieldAreas)
+        cAreas, nC = ndimage.measurements.label(self.fieldAreas)
         for i in range(len(self.cyclones)):
             self.cyclones[i].areaID = cAreas[self.cyclones[i].y,self.cyclones[i].x]
-    
-    ################################################
-    # Cyclone-Associated Precipitation Calculation #
-    ###############################################
-    def findCAP(self,plsc,ptot,yDist,xDist,lats,lons,pMin=0.375,r=250000):
-        self.CAP = findCAP(self,plsc,ptot,yDist,xDist,lats,lons,pMin,r)
-    
-    def findCAP2(self,plsc,ptot,yDist,xDist,lats,lons,pMin,r=250000):
-        self.CAP = findCAP2(self,plsc,ptot,yDist,xDist,lats,lons,pMin,r)   
     
     ######################
     # Summary Statistics #
@@ -190,15 +212,13 @@ class cyclonetrack:
     
     UNITS:
     time = days
-    x, y, dx, dy = grid cells (1 = 100 km)
-    area = sq grid cells (1 = 100 km^2)
+    x, y, dx, dy = grid cells (e.g., 1 = 100 km)
+    area = sq grid cells (e.g., 1 = 100 km^2)
     p_cent, p_edge, depth = Pa
     radius = grid cells
     u, v, uv = km/hr
-    DpDr = Pa/grid cell
     DsqP = Pa/(grid cell)^2
     DpDt = Pa/day
-    precip = mm (implied: mm (time interval)^-1)
     id, tid, sid, ftid, otid, centers, type = no units
         id = a unique number for each center identified in a SLP field
         tid = a unique number for each center track in a given month
@@ -221,21 +241,17 @@ class cyclonetrack:
         self.ptid = ptid # The most current parent track id
         
         # Create Main Data Frame
-        self.data = pd.DataFrame(columns=["time","id","pid","ptid",\
-            "x","y","lat","long","p_cent","p_edge","area","radius","depth",\
-            "DpDr","DsqP","DpDt","u","v","uv","Dx","Dy","type","centers",\
-            "Ege","Erg","Ely","Esp","Emg"])
+        self.data = pd.DataFrame()
         row0 = pd.DataFrame([{"time":center.time, "id":center.id, "pid":center.parent["id"],\
             "x":center.x, "y":center.y, "lat":center.lat, "long":center.long, \
             "p_cent":center.p_cent, "p_edge":center.p_edge, "area":center.area, \
-            "radius":center.radius(), "depth":center.depth(),"DpDr":center.Dp(),\
+            "radius":center.radius(), "depth":center.depth(),\
             "DsqP":center.DsqP,"type":center.type, "centers":center.centerCount(),\
-            "precip":center.precip,"precipArea":center.precipArea,\
             "Ege":Etype,"Erg":0,"Ely":0,"Esp":0,"Emg":0,"ptid":ptid},])
         self.data = self.data.append(row0, ignore_index=1, sort=1)
         
         # Create Events Data Frame
-        self.events = pd.DataFrame(columns=["time","id","event","Etype","otid","x","y"])
+        self.events = pd.DataFrame()
         event0 = pd.DataFrame([{"time":center.time,"id":center.id,"event":"ge",\
             "Etype":Etype,"otid":np.nan,"x":center.x,"y":center.y},])
         self.events = self.events.append(event0, ignore_index=1, sort=1)
@@ -262,10 +278,9 @@ class cyclonetrack:
         row = pd.DataFrame([{"time":center.time, "id":center.id, "pid":center.parent["id"],\
             "x":center.x, "y":center.y, "lat":center.lat, "long":center.long, \
             "p_cent":center.p_cent, "p_edge":center.p_edge, "area":center.area, \
-            "radius":center.radius(), "depth":center.depth(),"DpDr":center.Dp(),\
+            "radius":center.radius(), "depth":center.depth(),\
             "DsqP":center.DsqP,"type":center.type, "centers":center.centerCount(),\
             "Dp":Dp, "Dx":Dx, "Dy":Dy, "u":u, "v":v, "uv":uv, "DpDt":DpDt, "ptid":ptid,\
-            "precip":center.precip,"precipArea":center.precipArea,\
             "Ege":0,"Ely":0,"Esp":0,"Emg":0,"Erg":0},])
         
         self.data = self.data.append(row, ignore_index=1, sort=1)
@@ -368,6 +383,11 @@ class cyclonetrack:
         the total distance traveled (in kms).'''
         t = 24*(self.data.time.iloc[1] - self.data.time.iloc[0]) # Hours between timestep
         return t*self.data.loc[((self.data.type != 0) | (self.data.Ely > 0)),"uv"].sum()
+    def maxDistFromGenPnt(self):
+        '''Returns the maximum distance a cyclone is ever observed from its
+        genesis point in units of km.'''
+        v = np.max([haversine(self.data.lat[0],self.data.lat[i],self.data.long[0],self.data.long[i]) for i in range(len(self.data.long))])
+        return v/1000
     def avgArea(self):
         '''Identifies the average area for the track and the time stamp for 
         when it occurred.'''
@@ -400,10 +420,8 @@ class systemtrack:
     p_cent, p_edge, depth = Pa
     radius = grid cells
     u, v, uv = km/hr
-    DpDr = Pa/grid cell
     DsqP = Pa/(grid cell)^2
     DpDt = Pa/day
-    precip = mm (implied: mm (time interval)^-1)
     id, tid, sid, ftid, otid, centers, type = no units
         id = a unique number for each center identified in a SLP field
         tid = a unique number for each center track in a given month
@@ -483,6 +501,11 @@ class systemtrack:
         the total distance traveled (in kms).'''
         t = 24*(self.data.time.iloc[1] - self.data.time.iloc[0]) # Hours between timestep
         return t*self.data.loc[((self.data.type != 0) | (self.data.Ely > 0)),"uv"].sum()
+    def maxDistFromGenPnt(self):
+        '''Returns the maximum distance a cyclone is ever observed from its
+        genesis point in units of km.'''
+        v = np.max([haversine(self.data.lat[0],self.data.lat[i],self.data.long[0],self.data.long[i]) for i in range(len(self.data.long))])
+        return v/1000
     def avgArea(self):
         '''Identifies the average area for the track and the time stamp for 
         when it occurred.'''
@@ -498,39 +521,6 @@ class systemtrack:
     def CAP(self):
         '''Returns the total cyclone-associated precipitation for the cyclone center.'''
         return np.nansum( list(self.data.loc[self.data.type != 0,"precip"]) )
-
-class cycloneParameters:
-    '''This class stores parameters used for cyclone detection and tracking. The
-    only real purpose is to save the parameters being used for future reference.
-    
-    Will be removed in version 10_6.
-    '''
-    def __init__(self, outpath, timestart, timeend, timestep, timeref, reffile, \
-    cellsize, surfMin, surfMax, kSize, d_slp, d_dist, elevMax, contInt, \
-    mccTol, mccDist, speedMax, speedScalar, timecount, fieldElev=np.nan, \
-    fieldLats= np.nan, fieldLongs=np.nan):
-        self.outpath = outpath
-        self.timeStart = timestart
-        self.timeEnd = timeend
-        self.timeStep = timestep
-        self.timeCount = timecount
-        self.timeRef = timeref
-        self.fileRef = reffile
-        self.cellSize = cellsize
-        self.fieldElev = fieldElev
-        self.fieldLats = fieldLats
-        self.fieldLongs = fieldLongs
-        self.surfMin = surfMin
-        self.surfMax = surfMax
-        self.kSize = kSize
-        self.d_slp = d_slp
-        self.d_dist = d_dist
-        self.elevMax = elevMax
-        self.contInt = contInt
-        self.mccTol = mccTol
-        self.mccDist = mccDist
-        self.speedMax = speedMax
-        self.speedScalar = speedScalar
 
 '''        
 #################
@@ -557,10 +547,11 @@ def findNearestPoint(a,B,latlon=0):
     Finds the closest location in the array B to the point a, when a is an 
     ordered pair (row,col or lat,lon) and B is an array or list of ordered 
     pairs. All pairs should be in the same format (row,col) or (col,row).
-    
+
     The optional paramter latlon is 0 by default, meaning that "closest" is
     calculated as a Euclidian distance of numpy array positions. If latlon=1, 
-    the haversine formula is used to determine distance instead.
+    the haversine formula is used to determine distance instead, which means 
+    all ordered pairs should be (lat,lon).
     
     Returns the index of the location in B that is closest and the minimum distance.
     '''
@@ -643,7 +634,7 @@ def leapyearBoolean(years):
 '''###########################
 Calculate Days Between Two Dates
 ###########################'''
-def daysBetweenDates(date1,date2,lys=1):
+def daysBetweenDates(date1,date2,lys=1,dpy=365,nmons=12):
     '''
     Calculates the number of days between date1 (inclusive) and date2 (exclusive)
     when given dates in list format [year,month,day,hour,minute,second] or 
@@ -652,8 +643,15 @@ def daysBetweenDates(date1,date2,lys=1):
     
     date1 = the start date (earlier in time; entire day included in the count if time of day not specified)\n
     date2 = the end date (later in time; none of day included in count unless time of day is specified)
+    
+    lys = 0 for no leap years, 1 for leap years (+1 day in Feb) as in the Gregorian calendar
+    dpy = days per year in a non-leap year (defaults to 365)
+    nmons = number of months per year; if not using the Gregorian calendar, this must be a factor of dpy
     '''
-    db4 = [0,31,59,90,120,151,181,212,243,273,304,334] # Number of days in the prior months
+    if dpy == 365:
+        db4 = [0,31,59,90,120,151,181,212,243,273,304,334] # Number of days in the prior months
+    else:
+        db4 = list(np.arange(nmons)*int(dpy/nmons))
     
     if date1[0] == date2[0]: # If the years are the same...
         # 1) No intervening years, so ignore the year value:        
@@ -669,7 +667,7 @@ def daysBetweenDates(date1,date2,lys=1):
         else:
             lyb = [0]
         
-        daysY = 365*len(years)+np.sum(lyb) # calculate number of days
+        daysY = dpy*len(years)+np.sum(lyb) # calculate number of days
     
     if lys == 1:
         ly1 = leapyearBoolean([date1[0]])[0]
@@ -710,7 +708,7 @@ def daysBetweenDates(date1,date2,lys=1):
 '''###########################
 Add Time
 ###########################'''
-def timeAdd(time1,time2,lys=1):
+def timeAdd(time1,time2,lys=1,dpy=365):
     '''This function takes the sum of two times in the format [Y,M,D,H,M,S]. 
     The variable time1 should be a proper date (Months are 1 to 12, Hours are 0 to 23), 
     but time2 does not have to be a proper date. Note that if you use months or years in time2, 
@@ -719,8 +717,9 @@ def timeAdd(time1,time2,lys=1):
     can only handle non-integers for days, hours, minutes, and seconds. To
     perform date subtraction, simply make the entries in time2 negative numbers.
     
-    lys = Boolean to determine whether to recognize leap years (1; default) or to use
-    a constant 365-day calendar.
+    lys = Boolean to determine whether to recognize leap years (1; default) 
+    dpy = Days per yera (non leap years) -- must be 365 (default) or some multiple of 30 (e.g., 360).
+    --> Note: If there are leap years (lys = 1), dpy is forced to be 365
     
     Addition Examples:
     [2012,10,31,17,44,54] + [0,0,0,6,15,30] = [2012,11,1,0,0,24] #basic example
@@ -825,7 +824,7 @@ def timeAdd(time1,time2,lys=1):
                     dayR = dayA - sum(dpmA[monA-1:]) # go to Jan 1 of next year...
                     yrsR = yrsR+1
                     ly = leapyearBoolean([yrsR])[0]
-                    while dayR > 365+ly: # and keep subtracting 365 or 366 (leap year dependent) until until no local possible
+                    while dayR > 365+ly: # and keep subtracting 365 or 366 (leap year dependent) until until no longer possible
                         dayR = dayR - (365+ly)
                         yrsR = yrsR+1
                         if yrsR == 0: # Disallow 0-years
@@ -877,7 +876,7 @@ def timeAdd(time1,time2,lys=1):
                         dayR = dpmB[monR-1] + dayR
         
         ### 365-Day Calendar ###
-        else:            
+        elif dpy == 365:            
             if dayA > 0: # if the number of days is positive
                 if dayA <= dpmA[monA-1]: # if the number of days is positive and less than the full month...
                     dayR = dayA #...no more work needed
@@ -893,7 +892,7 @@ def timeAdd(time1,time2,lys=1):
                 else: # if the number of days is positive and will carry over to another year...
                     dayR = dayA - sum(dpmA[monA-1:]) # go to Jan 1 of next year...
                     yrsA = yrsA+1
-                    while dayR > 365: # and keep subtracting 365 or 366 (leap year dependent) until until no local possible
+                    while dayR > 365: # and keep subtracting 365 until until no longer possible
                         dayR = dayR - 365
                         yrsA = yrsA+1
                     
@@ -935,7 +934,68 @@ def timeAdd(time1,time2,lys=1):
                     while dayR <= 0:
                         monR = monR-1
                         dayR = dpmB[monR-1] + dayR
+            
+            ### Deal with BC/AD ###
+            if time1[0] < 0 and yrsA >= 0: # Going from BC to AD
+                yrsR = yrsA + 1
+            elif time1[0] > 0 and yrsA <= 0: # Going from AD to BC
+                yrsR = yrsA - 1
+            else:
+                yrsR = yrsA
         
+        ### 360-Day Calendar ### (or other mulitple of 30) ###
+        else:            
+            if dayA > 0: # if the number of days is positive
+                if dayA <= 30: # if the number of days is positive and less than the full month...
+                    monR = monA
+                    dayR = dayA #...no more work needed
+                
+                elif (dayA + (monA-1)*30) <= dpy: # if the number of days is positive and over a full month but not enough to carry over to the next year...
+                    monR = monA + int(dayA/30) # add months
+                    dayR = dayA%30 # find new day-of-month
+                
+                else: # if the number of days is positive and will carry over to another year...
+                    yrsA = yrsA+1
+                    dayR = monA*30 + dayA - dpy # go to Jan 1 of next year...
+                    
+                    yrsA = yrsA + int(dayR/dpy) # add years
+                    dayR = dayR%dpy # find new day-of-year
+
+                    monR = int(dayR/30) # add months
+                    dayR = dayR%30 # find new day-of-month
+                    
+            elif dayA == 0: # if the number of days is 0
+                if monA > 1:
+                    monR = monA-1
+                else:
+                    monR = int(dpy/30)
+                    yrsA = yrsA -1
+                dayR = 30
+            
+            else: # if the number of days is negative
+                if abs(dayA) < (monA-1)*30: # if the number of days will stay within the same year...
+                    monR = monA-1 + int(dayA/30) # Subtract months
+                    dayR = dayA%30 # Find new number of days
+                
+                else: # if the number of days is negative and will cross to prior year...
+                    yrsA = yrsA-1
+                    dayR = dayA + (monA-1)*30 # go to Dec 30 of prior year
+                    
+                    # find new day of year
+                    yrsA = yrsA + int(dayR/dpy) # subtract years
+                    dayR = dayR%dpy # find new day of year (switches to positive)
+                    
+                    monR = int(dayR/30) + 1  # add months
+                    dayR = dayR%30 # find new day of month
+            
+            if dayR == 0:
+                if monR == 1:
+                    yrsA = yrsA-1
+                    monR = int(dpy/30)
+                else:
+                    monR = monR-1
+                dayR = 30
+            
             ### Deal with BC/AD ###
             if time1[0] < 0 and yrsA >= 0: # Going from BC to AD
                 yrsR = yrsA + 1
@@ -1065,6 +1125,27 @@ def addLong(long0,dlong,neglong=1):
     return long1
 
 '''###########################
+Rotate Coordinates Around the Origin
+###########################'''
+def rotateCoordsAroundOrigin(x1,y1,phi):
+    '''This function will identify the new coordinates (x2,y2) of a point with 
+    coordinates (x1,y1) rotated by phi (radians) around the origin (0,0). The 
+    outputs are the two new coordinates x2 and y2.  Note that if using numpy arrays, 
+    "y" corresponds to the row position and "x" to the column position.
+    
+    x1, y1 = the x and y coordinates of the original point (integers or floats)\n
+    phi = the desired rotation from -pi to +pi radians
+    '''
+    # Calculate the distance from the origin:
+    c = np.sqrt(np.square(y1) + np.square(x1))
+    # Rotate X coordinate:
+    x2 = c*np.cos(np.arctan2(y1,x1)-phi)
+    # Rotate Y coordinate:
+    y2 = c*np.sin(np.arctan2(y1,x1)-phi)
+    
+    return x2,y2
+
+'''###########################
 Ring Kernel Creation
 ###########################'''
 def ringKernel(ri,ro,d=0):
@@ -1104,6 +1185,34 @@ def ringKernel(ri,ro,d=0):
         ringDist = ringMask*ringDist
         return ringDist
 
+def ringDistance(ydist, xdist, rad):
+    '''Given the grid cell size in the x and y direction and a desired radius, 
+    creates a numpy array for which the distance from the center is recorded
+    in all cells between a distance of rad and rad-mean(ydist,xdist) and all
+    other cells are np.nan.
+    
+    ydist, xdist = the grid cell size in the x and y direction
+    rad = the desired radius -- must be same units as xdist and ydist
+    '''
+    # number of cells in either cardinal direction of the center of the kernel
+    kradius = np.int( np.ceil( rad / min(ydist,xdist) ) )
+    # number of cells in each row and column of the kernel
+    kdiameter = kradius*2+1
+
+    # for each cell, calculate x distances and y distances from the center
+    kxdists = np.tile(np.arange(-kradius, kradius + 1), (kdiameter, 1)) * xdist
+    kydists = np.rot90(np.tile(np.arange(-kradius, kradius + 1), (kdiameter, 1)) * ydist)
+
+    # apply pythagorean theorem to calculate euclidean distances
+    kernel = np.sqrt(np.square(kxdists) + np.square(kydists))
+
+    # create a boolean mask which determines the cells that should be nan
+    mask = (kernel > rad) | (kernel <= (rad - np.mean((ydist, xdist))))
+
+    kernel[mask] = np.nan
+
+    return kernel
+
 '''###########################
 Circle Kernel Creation
 ###########################'''
@@ -1134,9 +1243,11 @@ def smoothField(var,kSize,nanedge=0):
     
     var = a numpy array of values to be smoothed
     kSize = a tuple or list of the half-height and half-width of the kernel or,
-        if the kernel is a square, this may be a single number repsresenting half-width
+        if the kernel is a square, this may be a single number representing half-width
     nanedge = binary that indicates treatment of edges; if 0, nans are ignored in calculations, 
         if 1, the smoothed value will be a nan if any nans are observed in the kernel
+        
+    # WARNING: Deprecated starting in Version 12 of code. Use scipy.ndimage.uniform_filter instead.
     '''
     
     # Create kernel
@@ -1255,15 +1366,12 @@ def kernelGradient(field,location,yDist,xDist,rad):
     
     Returns a mean gradient in field units per radius units
     '''
-    # Define row, col, and kernel half-width
+    # Define row & col
     row, col = location[0], location[1]
-    ksize = np.int( np.ceil( rad / min(yDist[row,col],xDist[row,col]) ) )
-    kernel = np.zeros((ksize*2+1,ksize*2+1))
-    for r in range(int(ksize*2+1)):
-        for c in range(int(ksize*2+1)):
-            kernel[r,c] = (((r-ksize)*yDist[row,col])**2 + ((c-ksize)*xDist[row,col])**2)**0.5
-            if kernel[r,c] > rad or kernel[r,c] <= (rad-np.mean([yDist[row,col],xDist[row,col]])):
-                kernel[r,c]=np.nan
+    
+    # Define ring distance kernel & kernel size
+    kernel = ringDistance(yDist[row,col],xDist[row,col],rad)
+    ksize = int((kernel.shape[0]-1)/2)
     
     # Define the starting and stopping rows and cols:
     rowS = row-ksize
@@ -1300,7 +1408,7 @@ def kernelGradient(field,location,yDist,xDist,rad):
     subset_ring = (subset - field[row,col])/kernel
     
     # Find the mean value (excluding nans)
-    mean = np.nansum(subset_ring) / ( np.sum( np.isfinite(subset_ring) ) )
+    mean = np.nanmean(subset_ring)
     
     return mean
 
@@ -1322,7 +1430,7 @@ def slope_latlong(var, lat, lon, edgeLR = "calc", edgeTB = "calc", dist="km"):
     dist = the units of the denominator in the output (meters by default,
         also accepts kilometers, miles, or nautical miles)\n
     edgeLR, edgeTB = behavior of the gradient calculation at the left and right
-        hand edges and top and bottom edges of the nupy array, respectively.
+        hand edges and top and bottom edges of the numpy array, respectively.
         Choose "calc" to claculate a partial Sobel operator, "wrap" if opposite
         edges are adjacent, "nan" to set the edges to a nan value, and "zero"
         to set the edges to a zero value. By default, the function will calculate 
@@ -1463,7 +1571,7 @@ def slope_latlong(var, lat, lon, edgeLR = "calc", edgeTB = "calc", dist="km"):
     dZdX, dZdY = dZdX*cleaner, dZdY*cleaner # such cells are set to a gradient of 0!
     
     # Slope Magnitude
-    slope = ( dZdX**2. + dZdY**2.)**0.5  
+    slope = np.sqrt( np.square(dZdX) + np.square(dZdY) )  
     
     return slope, dZdX, dZdY
 
@@ -1471,58 +1579,31 @@ def slope_latlong(var, lat, lon, edgeLR = "calc", edgeTB = "calc", dist="km"):
 Calculate Laplacian of Field
 ###########################'''
 def laplacian(field,multiplier=1):
-    '''Given a field, this function calculates the Laplacian (the field's 
+    '''Given a field, this function calculates the Laplacian (similar to the field's 
     second derivative over two dimensions). The gradient is calculated using a 
     Sobel operator, so edge effects do exist. Following the method of Murray 
     and Simmonds (1991), the second derivative is first calculated for the x 
-    and y orthognoal components individally and then combined.
+    and y orthognoal components individally and then combined to giv a divergence.
     
     field = a numpy array of values over which to take the Laplacian\n
     multiplier (optional) = an optional multiplier for converting units at the
     end of the calculation.  For example to convert from Pa/[100 km]^2 to 
     hPa/[100 km]^2, use 0.01.  The default is 1.
     '''
-    # Introduce empty arrays:
-    slopeX = np.zeros(field.shape, dtype=float)
-    slopeY = np.zeros(field.shape, dtype=float)
-        
-    laplacX = np.zeros(field.shape, dtype=float)
-    laplacY = np.zeros(field.shape, dtype=float)
-    laplac = np.zeros(field.shape, dtype=float)
+    # Calculate gradient with sobel operator
+    sobY = ndimage.sobel(field,axis=0,mode='constant',cval=np.nan)/-8
+    sobX = ndimage.sobel(field,axis=1,mode='constant',cval=np.nan)/8
     
-    # First Gradient
-    for row in range(field.shape[0]):
-        for col in range(field.shape[1]):
-            try:
-                slopeX[row,col] = ((field[row-1,col+1]+2.*field[row,col+1]+field[row+1,col+1])\
-                - (field[row-1,col-1]+2.*field[row,col-1]+field[row+1,col-1])) / (8.)
-            except:
-                slopeX[row,col] = np.nan
-            try:
-                slopeY[row,col] = -((field[row+1,col-1]+2.*field[row+1,col]+field[row+1,col+1])\
-                - (field[row-1,col-1]+2.*field[row-1,col]+field[row-1,col+1])) / (8.)
-            except:
-                slopeY[row,col] = np.nan
-            
-    # Second Gradient
-    for row in range(field.shape[0]):
-        for col in range(field.shape[1]):
-            try:
-                laplacX[row,col] = ((slopeX[row-1,col+1]+2.*slopeX[row,col+1]+slopeX[row+1,col+1])\
-                - (slopeX[row-1,col-1]+2.*slopeX[row,col-1]+slopeX[row+1,col-1])) / (8.)
-            except:
-                laplacX[row,col] = np.nan
-            try:
-                laplacY[row,col] = -((slopeY[row+1,col-1]+2.*slopeY[row+1,col]+slopeY[row+1,col+1])\
-                - (slopeY[row-1,col-1]+2.*slopeY[row-1,col]+slopeY[row-1,col+1])) / (8.)
-            except:
-                laplacY[row,col] = np.nan
+    # Calcualte gradient of the gradient with sobel again 
+    lapY = ndimage.sobel(sobY,axis=0,mode='constant',cval=np.nan)/-8
+    lapX = ndimage.sobel(sobX,axis=1,mode='constant',cval=np.nan)/8
     
-    laplac = laplacX + laplacY
+    # Add components
+    laplac = (lapY + lapX)*multiplier
 
-    return laplac*multiplier
+    return laplac
 
-def laplacian_latlong(field,lats,longs,edgeLR = "calc", edgeTB = "calc", dist="km"):
+def laplacian_latlong(field,lats,lons,edgeLR = "calc", edgeTB = "calc", dist="km"):
     '''Given a field, this function calculates the Laplacian (the field's 
     second derivative over two dimensions). The gradient is calculated using a 
     Sobel operator, so edge effects do exist. Following the method of Murray 
@@ -1532,7 +1613,7 @@ def laplacian_latlong(field,lats,longs,edgeLR = "calc", edgeTB = "calc", dist="k
     field = a numpy array of values over which to take the Laplacian\n
     lats = a numpy array of latitudes (shape should match field)\n
     longs = a numpy array of longitudes (shape should match field)\n
-        dist = the units of the denominator in the output (meters by default,
+    dist = the units of the denominator in the output (meters by default,
         also accepts kilometers, miles, or nautical miles)\n
     edgeLR, edgeTB = behavior of the gradient calculation at the left and right
         hand edges and top and bottom edges of the nupy array, respectively.
@@ -1544,86 +1625,116 @@ def laplacian_latlong(field,lats,longs,edgeLR = "calc", edgeTB = "calc", dist="k
         90 latitude (i.e. distance is zero at the edge).
     '''
     # First Gradient
-    slopeX, slopeY = slope_latlong(field, lats, longs, edgeLR, edgeTB, dist)[1:3]
+    slopeX, slopeY = slope_latlong(field, lats, lons, edgeLR, edgeTB, dist)[1:]
     
     # Second Gradient
-    laplacX = slope_latlong(slopeX, lats, longs, edgeLR, edgeTB, dist)[1]
-    laplacY = slope_latlong(slopeY, lats, longs, edgeLR, edgeTB, dist)[2]
+    laplacX = slope_latlong(slopeX, lats, lons, edgeLR, edgeTB, dist)[1]
+    laplacY = slope_latlong(slopeY, lats, lons, edgeLR, edgeTB, dist)[2]
     
     return laplacX + laplacY
 
 '''###########################
-Detect Minima/Maxima of a Surface
+Create Array Neighborhood
 ###########################'''
-def detectMinima(field,kSize=1,nanthreshold=0.5):
+def arrayNeighborhood(var,kSize=3,edgeLR=0,edgeTB=0):
+    '''
+    '''
+    k = kSize-1
+    nrow = var.shape[0]
+    ncol = var.shape[1]
+    
+    varcube = []
+    
+    if edgeLR != "wrap" and edgeTB != "wrap":
+        for i in range(kSize):
+            for j in range(kSize):
+                varcube.append( np.hstack(( np.zeros((nrow+k,j))+edgeLR , np.vstack(( np.zeros((k-i,ncol))+edgeTB, var, np.zeros((i,ncol))+edgeTB )) , np.zeros((nrow+k,k-j))+edgeLR )) )
+
+    elif edgeLR == "wrap" and edgeTB == "wrap":
+         for i in range(kSize):
+            for j in range(kSize):
+                varcube.append( np.vstack(( np.hstack((var[-(k-i):,-(k-j):] , var[-(k-i):,:], var[-(k-i):,0:j])), np.hstack((var[:,-(k-j):], var, var[:,0:j])) , np.hstack((var[0:i,-(k-j):], var[0:i,:], var[0:i,0:j])) ))[:nrow+k,:ncol+k] )
+
+    elif edgeLR == "wrap" and edgeTB != "wrap":
+         for i in range(kSize):
+            for j in range(kSize):
+                varcube.append( np.vstack(( np.zeros((i,ncol+k))+edgeTB , np.hstack((var[:,-(k-j):], var, var[:,0:j]))[:,:ncol+k], np.zeros(((k-i),ncol+k))+edgeTB )) )
+    
+    else:
+         for i in range(kSize):
+            for j in range(kSize):
+                varcube.append( np.hstack(( np.zeros((nrow+k,j))+edgeLR , np.vstack((var[-(k-i):,:], var, var[0:i,:]))[:nrow+k,:] , np.zeros((nrow+k,(k-j)))+edgeLR )) )
+
+    return np.array(varcube)
+
+'''###########################
+Detect Minima and Maxima
+###########################'''
+def detectMinima(var, mask, kSize=3, nanthreshold=1):
     '''Identifies local minima in a numpy array (surface) by searching within a 
     square kernel (the neighborhood) for each grid cell. Ignores nans by default.
     
-    field = a numpy array that represents some surface of interest (numpy array)
-    kSize = given a center grid cell, how many many gridcells should be
-        searched in each direction? The default of 1 gives a 3*3 kernel, 2 
-        gives 5*5, and so on.
-    nanthreshold = maximum ratio of nan cells to total cells around the center
-        cell for each minimum test. 0 means that no cell with a nan neighbor 
-        can be considered a minimum. 0.5 means that less than half of the 
-        neighbors can be nans for a cell to be considered a minimum. 1 means 
-        that a cell will be considered a minimum if all cells around it are nan.
+    field = a numpy array that represents some surface of interest
+    mask = a numpy array of 0s and NaNs used to mask results -- can repeat var 
+        input here if no mask exists
+    kSize = kernel size (e.g., 3 means a 3*3 kernel centered on each grid cell)
+    nanthreshold = maximum ratio of nan cells to total cells in the kernel for
+        each minimum test. 0 means that no cell with a nan neighbor can be 
+        considered a minimum. 0.5 means that less than half of the cells in the
+        kernel can be nans for a cell to be considered a minimum. 1 means 
+        that a cell will be considered a minimum even if all cells around it 
+        are nan. Warning: since the center cell of the kernel is included in 
+        the ratio, if you want to make decisions based on the ratio of nerighbors
+        that exceed some threshold, scale your desired threshold as such: 
+            nanthreshold = desiredthreshold * (kSize*kSize-1)/(kSize*kSize).
     '''
-    field_min = np.zeros_like(field) # 1s for minima    
-    
-    for row in range(kSize,field.shape[0]-kSize):
-        for col in range(kSize,field.shape[1]-kSize):
-            # Slice the surface using the kernel
-            Slice = field[row-kSize:row+kSize+1,col-kSize:col+kSize+1]
-            # If less than half of the values around the center of the slice are nans
-            nanfraction = np.sum(np.isnan(Slice)) / float((Slice.shape[0]*Slice.shape[1])-1)
-            if nanthreshold > nanfraction:
-                # Find the minimum non-nan value
-                if Slice[kSize,kSize] == np.nanmin(Slice): # If the center of the slice is also the minimum
-                    field_min[row,col] = 1 # Assign a 1 to the minimum field for that location
-    
-    return field_min
+    # Find percentage of NaNs in each neighborhood
+    nancount = ndimage.uniform_filter(np.isnan(mask).astype(np.float),kSize)
 
-def detectMaxima(field,kSize=1,nanthreshold=0.5):
+    # Find the local minima
+    output = ndimage.minimum_filter(var,kSize)
+    
+    # export valid locations as 1s and invalid locations as 0s
+    return (output == var) & (nancount < nanthreshold) & np.isfinite(mask)
+
+def detectMaxima(var, mask, kSize=3, nanthreshold=1):
     '''Identifies local maxima in a numpy array (surface) by searching within a 
-    square kernel (the neighborhood) for each gridcell. Ignores nans by default.
+    square kernel (the neighborhood) for each grid cell. Ignores nans by default.
     
-    field = a numpy array that represents some surface of interest (numpy array)
-    kSize = given a center gridcell, how many many gridcells should be
-        searched in each direction? The default of 1 gives a 3*3 kernel, 2 
-        gives 5*5, and so on.
-    nanthreshold = maximum ratio of nan cells to total cells around the center
-        cell for each maximum test. 0 means that no cell with a nan neighbor 
-        can be considered a maximum. 0.5 means that less than half of the 
-        neighbors can be nans for a cell to be considered a maximum. 1 means 
-        that a cell will be considered a maximum if all cells around it are nan.
+    field = a numpy array that represents some surface of interest
+    mask = a numpy array of 0s and NaNs used to mask results -- can repeat var 
+        input here if no mask exists
+    kSize = kernel size (e.g., 3 means a 3*3 kernel centered on each grid cell)
+    nanthreshold = maximum ratio of nan cells to total cells in the kernel for
+        each maximum test. 0 means that no cell with a nan neighbor can be 
+        considered a maximum. 0.5 means that less than half of the cells in the
+        kernel can be nans for a cell to be considered a maximum. 1 means 
+        that a cell will be considered a maximum even if all cells around it 
+        are nan. Warning: since the center cell of the kernel is included in 
+        the ratio, if you want to make decisions based on the ratio of nerighbors
+        that exceed some threshold, scale your desired threshold as such: 
+            nanthreshold = desiredthreshold * (kSize*kSize-1)/(kSize*kSize).
     '''
-    field_max = np.zeros_like(field) # 1s for maxima    
+    # Find percentage of NaNs in each neighborhood
+    nancount = ndimage.uniform_filter(np.isnan(mask).astype(np.float),kSize)
+
+    # Find the local minima
+    output = ndimage.maximum_filter(var,kSize)
     
-    for row in range(kSize,field.shape[0]-kSize):
-        for col in range(kSize,field.shape[1]-kSize):
-            # Slice the surface using the kernel
-            Slice = field[row-kSize:row+kSize+1,col-kSize:col+kSize+1]
-            # If less than half of the values aroudn the center of the slice are nans
-            nanfraction = np.sum(np.isnan(Slice)) / float((Slice.shape[0]*Slice.shape[1])-1)
-            if nanthreshold > nanfraction:
-                # Find the maximum non-nan value
-                if Slice[kSize,kSize] == np.nanmax(Slice): # If the center of the slice is also the maximum
-                    field_max[row,col] = 1 # Assign a 1 to the maximum field for that location
-    
-    return field_max
-    
+    # export valid locations as 1s and invalid locations as 0s
+    return (output == var) & (nancount < nanthreshold) & np.isfinite(mask)
+
 '''###########################
 Find Special Types of Minima of a Surface
 ###########################'''
-def findCenters(field, kSize=1, nanthreshold=0.5, d_slp=0, d_dist=0, yDist=0, xDist=0):
+def findCenters(field, mask, kSize=3, nanthreshold=0.5, d_slp=0, d_dist=100, yDist=0, xDist=0):
     '''This function identifies minima in a field and then eliminates minima
     that do not satisfy a gradient parameter. By default, the function will 
     ONLY find minima.
     
     field = the numpy array that you want to find the minima of.\n
-    kSize = the number of rings out from a gridcell that should be considered
-        when determining whether it is a minimum; 1 by default\n
+    kSize = the kernel size that should be considered
+        when determining whether it is a minimum; 3 by default\n
     nanthreshold = maximum ratio of nan cells to total cells around the center
         cell for each minimum test. 0 means that no cell with a nan neighbor 
         can be considered a minimum. 0.5 means that less than half of the 
@@ -1636,25 +1747,21 @@ def findCenters(field, kSize=1, nanthreshold=0.5, d_slp=0, d_dist=0, yDist=0, xD
         necessary if calculating gradients, so the default is 0.\n
     '''
     # STEP 1.1. Identify Minima:
-    fieldMinima = detectMinima(field,kSize,nanthreshold=nanthreshold).astype(np.int)
-    rowMin, colMin = np.where(fieldMinima == 1)
+    fieldMinima = detectMinima(field,mask,kSize,nanthreshold=nanthreshold).astype(np.uint8)
     
     # STEP 1.2. Discard Weak Minima:        
-    if d_slp == 0:
-        fieldCenters = fieldMinima
+    rowMin, colMin = np.where(fieldMinima == 1) # Identify locations of minima
+    sysMin = fieldMinima.copy() # make a mutable copy of the minima locations
     
-    else:
-        sysMin = fieldMinima.copy() # make a mutable copy of the minima locations
-        
-        d_grad = float(d_slp)/d_dist # Define gradient limit
-        for sm in range(np.sum(fieldMinima)): # For each minimum...
-            # Calculate gradient:
-            mean_gradient = kernelGradient(field,(rowMin[sm],colMin[sm]),yDist,xDist,d_dist)
+    d_grad = float(d_slp)/d_dist # Define gradient limit
+    for sm in range(len(rowMin)): # For each minimum...
+        # Calculate gradient:
+        mean_gradient = kernelGradient(field+mask,(rowMin[sm],colMin[sm]),yDist,xDist,d_dist)
 #            print(str(sm) +": mean_gradient: " + str(mean_gradient) + ",  d_grad: " + str(d_grad))
-            # Test for pressure gradient:
-            if (mean_gradient < d_grad):
-                sysMin[rowMin[sm],colMin[sm]] = 0
-        
+        # Test for pressure gradient:
+        if (mean_gradient < d_grad):
+            sysMin[rowMin[sm],colMin[sm]] = 0
+    
         # Save centers
         fieldCenters = sysMin
     
@@ -1691,7 +1798,7 @@ def findAreas(field,fieldCenters,centers,contint,mcctol,mccdist,lats,lons,maxes=
         field_max = maxes
     
     # Prepare preliminary outputs:
-    cycField = np.zeros_like(field) # set up empty system field
+    cycField = np.zeros_like(fieldCenters) # set up empty system field
     fieldCenters2 = fieldCenters.copy() # set up a field to modify center identification
     # Make cyclone objects for all centers
     cols, rows, vals, las, los = [], [], [], [], []
@@ -1718,7 +1825,7 @@ def findAreas(field,fieldCenters,centers,contint,mcctol,mccdist,lats,lons,maxes=
         ## that hasn't already been assigned to a cyclone:
         cid = ids[np.where((types == 0) & (np.array(vals) == np.min(np.array(vals)[np.where(types == 0)[0]])))][0]
                         
-        nMins = 0 # set the flag to 1
+        nMins = 0 # set flag to 0
         nMaxs = 0 # set flag to 0
         cCI = vals[cid] # set the initial contouring value
         
@@ -1738,15 +1845,13 @@ def findAreas(field,fieldCenters,centers,contint,mcctol,mccdist,lats,lons,maxes=
                 
                 # Define contiguous areas
                 fieldCI = np.where(field < cCI, 1, 0)
-                areas, nA = scipy.ndimage.measurements.label(fieldCI)
+                areas, nA = ndimage.measurements.label(fieldCI)
                 
-                # Test how many minima are within the area associated with the minimum of interest
-                areaTest = np.where((areas == areas[rows[cid],cols[cid]]) & (fieldCenters != 0), 1, 0) # Limit to minima within that area
-                nMins = np.sum(areaTest)-1 # Count the number of minima identified (besides the minimum of focus)
+                # Test how many minima are within the area associated with the minimum of interest -  Limit to minima within that area
+                nMins = np.sum( np.where((areas == areas[rows[cid],cols[cid]]) & (fieldCenters > 0), 1, 0) ) - 1 # Count the number of minima identified (besides the minimum of focus)
                 
-                # Test how many maxima are within the area associated with the minimum of interest
-                maxTest = np.where((areas == areas[rows[cid],cols[cid]]) & (field_max == 1), 1, 0) # Limit to maxima within that area           
-                nMaxs = np.sum(maxTest) # Count the number of maxima identified
+                # Test how many maxima are within the area associated with the minimum of interest - Limit to maxima within that area           
+                nMaxs = np.sum( np.where((areas == areas[rows[cid],cols[cid]]) & (field_max == 1), 1, 0) ) # Count the number of maxima identified
             
             # Re-adjust the highest contour interval
             cCI = cCI - contint
@@ -1762,14 +1867,13 @@ def findAreas(field,fieldCenters,centers,contint,mcctol,mccdist,lats,lons,maxes=
                 
                 # Define contiguous areas
                 fieldCI = np.where(field < cCI, 1, 0)
-                areas, nA = scipy.ndimage.measurements.label(fieldCI)
+                areas, nA = ndimage.measurements.label(fieldCI)
                 
                 # Test how many minima are within the area associated with the minimum of interest
-                areaTest = np.where((areas == areas[rows[cid],cols[cid]]) & (fieldCenters != 0)) # Limit to minima within that area
+                areaTest = np.where((areas == areas[rows[cid],cols[cid]]) & (fieldCenters > 0)) # Limit to minima within that area
                 
-                # Test how many maxima are within the area associated with the minimum of interest
-                maxTest = np.where((areas == areas[rows[cid],cols[cid]]) & (field_max == 1), 1, 0) # Limit to maxima within that area           
-                nMaxs = np.sum(maxTest) # Count the number of maxima identified
+                # Test how many maxima are within the area associated with the minimum of interest - Limit to maxima within that area
+                nMaxs = np.sum( np.where((areas == areas[rows[cid],cols[cid]]) & (field_max == 1), 1, 0) ) # Count the number of maxima identified
                 
                 # Record the area and the ids of the minima encircled for each contint
                 locSub = [(areaTest[0][ls],areaTest[1][ls]) for ls in range(areaTest[0].shape[0])]
@@ -1824,7 +1928,7 @@ def findAreas(field,fieldCenters,centers,contint,mcctol,mccdist,lats,lons,maxes=
         #########################
         # Assign final contiguous areas:
         fieldF = np.where(field < (cCI), 1, 0)
-        areasF, nAF = scipy.ndimage.measurements.label(fieldF)
+        areasF, nAF = ndimage.measurements.label(fieldF)
         
         # And identify the area associated with the minimum of interest:
         area = np.where((areasF == areasF[rows[cid],cols[cid]]) & (areasF != 0),1,0)
@@ -1849,19 +1953,22 @@ def findAreas(field,fieldCenters,centers,contint,mcctol,mccdist,lats,lons,maxes=
         #print("ID: " + str(cid) + ", Row: " + str(rows[cid]) + ", Col: " + str(cols[cid]) + \
         #        ", Area:" + str(np.nansum(area)))
 
-    return cycField, fieldCenters2, cyclones
+    return cycField.astype(np.uint8), fieldCenters2, cyclones
 
 '''###########################
 Calculate Cyclone Associated Precipitation
 ###########################'''
-def findCAP(cycfield,plsc,ptot,yDist,xDist,lats,longs,pMin=0.375,r=250000):
+def findCAP(cyclones,areas,plsc,ptot,yDist,xDist,lats,lons,pMin=0.375,r=250000):
     '''Calculates the cyclone-associated precipitation for each cyclone in
     a cyclone field object for a particular time. Input precipitation fields 
     must have the same projection and grid cell size as the cyclone field.\n
     
     Required inputs:\n
-    cycfield = a cyclone field object with cyclone centers and areas already 
-        calculated (using the findCenters and findAreas functions).
+    cyclones = list of cyclone objects for the instant in time under consideration.
+        Typically, this will be a subset of cyclones (e.g., only primary cyclone 
+        centers) from a cyclonefield object
+    areas = an array of 1s and 0s, where 1 indicates grid cells within the area of a cyclone\n
+    (Note that both cyclones and areas can be found in a cyclonefield object)\n
     plsc = large-scale precipitation field
     ptot = total precipitation field
     yDist, xDist = numpy arrays of distances between rows and columns. Only 
@@ -1884,28 +1991,26 @@ def findCAP(cycfield,plsc,ptot,yDist,xDist,lats,longs,pMin=0.375,r=250000):
     ptot, plsc = np.where(np.isfinite(ptot) == 1,ptot,0), np.where(np.isfinite(plsc) == 1,plsc,0)
     
     # Add edges to the precipitation rasters
-    cR, cC = cycfield.fieldAreas.shape[0], cycfield.fieldAreas.shape[1]
+    cR, cC = areas.shape[0], areas.shape[1]
     pR, pC = plsc.shape[0], plsc.shape[1]
     
-    plsc = np.hstack(( np.zeros( (cR,(cC-pC)/2) ) , \
-    np.vstack(( np.zeros( ((cR-pR)/2,pC) ), plsc ,np.zeros( ((cR-pR)/2,pC) ) )), \
-    np.zeros( (cR,(cC-pC)/2) ) ))
+    plsc = np.hstack(( np.zeros( (cR,int((cC-pC)/2)) ) , \
+    np.vstack(( np.zeros( (int((cR-pR)/2),pC) ), plsc ,np.zeros( (int((cR-pR)/2),pC) ) )), \
+    np.zeros( (cR,int((cC-pC)/2)) ) ))
     
-    ptot = np.hstack(( np.zeros( (cR,(cC-pC)/2) ) , \
-    np.vstack(( np.zeros( ((cR-pR)/2,pC) ), ptot ,np.zeros( ((cR-pR)/2,pC) ) )), \
-    np.zeros( (cR,(cC-pC)/2) ) ))
+    ptot = np.hstack(( np.zeros( (cR,int((cC-pC)/2)) ) , \
+    np.vstack(( np.zeros( (int((cR-pR)/2),pC) ), ptot ,np.zeros( (int((cR-pR)/2),pC) ) )), \
+    np.zeros( (cR,int((cC-pC)/2)) ) ))
     
     # Identify large-scale precipitation regions
     pMasked = np.where(plsc >= pMin, 1, 0)
-    pAreas, nP = scipy.ndimage.measurements.label(pMasked)
-    cAreas, nC = scipy.ndimage.measurements.label(cycfield.fieldAreas)
-    aIDs = [c.areaID for c in cycfield.cyclones]
+    pAreas, nP = ndimage.measurements.label(pMasked)
+    cAreas, nC = ndimage.measurements.label(areas)
+    aIDs = [c.areaID for c in cyclones]
     
     # Identify cyclone ids
-    ids = np.array(range(len(cycfield.centerCount())))
-    ids1 = ids[np.where(np.array(cycfield.centerType()) == 1)]
-    ids2 = ids[np.where(np.array(cycfield.centerType()) == 2)]
-    
+    ids = np.array(range(len(cyclones)))
+
     # Create empty lists/arrays
     cInt = [[] for p in range(nP+1)]# To store the cyc ID for each precip region
     cPrecip = np.zeros((len(ids))) # To store the total precip for each cyclone center
@@ -1914,27 +2019,26 @@ def findCAP(cycfield,plsc,ptot,yDist,xDist,lats,longs,pMin=0.375,r=250000):
     ######################
     # FIND INTERSECTIONS #
     ######################
-    for i in ids1: # For each PRIMARY center,
+    for i in ids: # For each center,
         # Identify corresponding area
-        c = cycfield.cyclones[i]
+        c = cyclones[i]
         cArea = np.where(cAreas == aIDs[i],1,0) # Calc'd area
         
-        try: # Add a radius-based area if possible
-            k = np.ceil( r / min(yDist[c.y,c.x],xDist[c.y,c.x]) )
-            kernel = np.zeros((k*2+1,k*2+1))
-            for row in range(int(k*2+1)):
-                for col in range(int(k*2+1)):
-                    if r >= (((row-k)*yDist[c.y,c.x])**2 + ((col-k)*xDist[c.y,c.x])**2)**0.5:
-                        kernel[row,col]=1
-            
-            cArea[c.y-k:c.y+k+1,c.x-k:c.x+k+1] = \
-            np.where(cArea[c.y-k:c.y+k+1,c.x-k:c.x+k+1] + kernel != 0, 1, 0) # Add a radius-based area
-            for ii in c.secondary: # Add any secondary radius-based areas
-                cc = cycfield.cyclones[ii]
-                cArea[cc.y-k:cc.y+k+1,cc.x-k:cc.x+k+1] = \
-                np.where(cArea[cc.y-k:cc.y+k+1,cc.x-k:cc.x+k+1] + kernel != 0, 1, 0)
-        except:
-            continue
+        # number of cells in either cardinal direction of the center of the kernel
+        k = np.int( np.ceil( r /  min(yDist[c.y,c.x],xDist[c.y,c.x]) ) )
+        # number of cells in each row and column of the kernel
+        kdiameter = k*2+1
+    
+        # for each cell, calculate x distances and y distances from the center
+        kxdists = np.tile(np.arange(-k, k + 1), (kdiameter, 1)) * xDist[c.y,c.x]
+        kydists = np.rot90(np.tile(np.arange(-k, k + 1), (kdiameter, 1)) * yDist[c.y,c.x])
+        
+        # Assign True/False based on distance from center
+        kernel = np.sqrt( np.square(kxdists) + np.square(kydists) ) <= r
+        
+        # Modify cyclone area
+        cArea[c.y-k:c.y+k+1,c.x-k:c.x+k+1] = \
+        np.where(cArea[c.y-k:c.y+k+1,c.x-k:c.x+k+1] + kernel != 0, 1, 0) # Add a radius-based area
         
         # Find the intersecting precip areas
         pInt = np.unique(cArea*pAreas)[np.where(np.unique(cArea*pAreas) != 0)]
@@ -1959,33 +2063,40 @@ def findCAP(cycfield,plsc,ptot,yDist,xDist,lats,longs,pMin=0.375,r=250000):
             cPrecipArea[cInt[p][0]] += np.sum(pArea)
         
         # If more than one cyclone center intersects, 
-        else:
-            # Assign each grid cell individually based on closest center
-            plocs = np.where(pAreas == p) # Find grid cells for area
+        else:  # Assign each grid cell to the closest cyclone area
+            # Identify coordinates for this precipitation area
+            pcoords = np.array(np.where(pAreas == p)).T
             
-            for i in range(len(plocs[0])):
-                # Find the closest area
-                aInt = [aIDs[a] for a in cInt[p]]
-                ai = findNearestArea((lats[plocs[0][i],plocs[1][i]],longs[plocs[0][i],plocs[1][i]]),cAreas,aInt,latlon=(lats,longs))
-                ci = cInt[p][np.where(np.array(aInt) == ai)[0][0]]
+            # Identify the area indices
+            aInt = [aIDs[a] for a in cInt[p]] 
+            
+            # Find the minimum distance between each point in the precipitation area 
+            # and any point in each intersecting cyclone area
+            distances = []
+            for ai in aInt: # Looping through each cyclone area
+                acoords = np.array(np.where(cAreas == ai)).T # Identifying coordinates for the cyclone area
+                distances.append( cdist(pcoords,acoords).min(axis=1) ) # Identifying the minimum distance from each precip area coordinate
+            
+            # Identify which cyclone area contained the shortest distance for each point within the precip area
+            closest_index = np.array(distances).argmin(axis=0)
+            
+            # Assign TOTAL precip to the closest cyclone
+            for i,ai in enumerate(aInt):
+                ci = cInt[p][np.where(np.array(aInt) == ai)[0][0]] # Cyclone index associated with that area index
                 
-                # Assign TOTAL precip to the cyclone
-                cPrecip[ci] += ptot[plocs[0][i],plocs[1][i]]
-                cPrecipArea[ci] += 1
+                pcoords2 = pcoords[closest_index == i] # Subset to just the precip area coordinate for which this cyclone's area is closest
+                
+                cPrecip[ci] += ptot[pcoords2[:,0],pcoords2[:,1]].sum() # Sum all precip
+                cPrecipArea[ci] += pcoords2.shape[0] # Add all points
     
     ##################
     # RECORD PRECIP #
     #################
     # Final assignment of precip to primary cyclones
-    for i in ids1:
-        cycfield.cyclones[i].precip = cPrecip[i]
-        cycfield.cyclones[i].precipArea = cPrecipArea[i]
-    
-    for i in ids2:
-        par = cycfield.cyclones[i].parent['id']
-        cycfield.cyclones[i].precip = cPrecip[par]
-        cycfield.cyclones[i].precipArea = cPrecipArea[par]
-    
+    for i in ids:
+        cyclones[i].precip = cPrecip[i]
+        cyclones[i].precipArea = cPrecipArea[i]
+
     # Return CAP field
     return ptot*np.in1d(pAreas,np.array(pList)).reshape(pAreas.shape)
 
@@ -2037,8 +2148,8 @@ def findCAP2(cycfield,plsc,ptot,yDist,xDist,lats,longs,pMin,r=250000):
     
     # Identify large-scale precipitation regions
     pMasked = np.where(plsc >= pMin, 1, 0)
-    pAreas, nP = scipy.ndimage.measurements.label(pMasked)
-    cAreas, nC = scipy.ndimage.measurements.label(cycfield.fieldAreas)
+    pAreas, nP = ndimage.measurements.label(pMasked)
+    cAreas, nC = ndimage.measurements.label(cycfield.fieldAreas)
     aIDs = [c.areaID for c in cycfield.cyclones]
     
     # Identify cyclone ids
@@ -2153,7 +2264,6 @@ def nullifyCycloneTrackInstance(ctrack,time,ptid):
     ctrack.data.loc[ctrack.data.time == time, "radius"] = 0
     ctrack.data.loc[ctrack.data.time == time, "type"] = 0
     
-    ctrack.data.loc[ctrack.data.time == time, "DpDr"] = np.nan
     ctrack.data.loc[ctrack.data.time == time, "DpDt"] = np.nan
     ctrack.data.loc[ctrack.data.time == time, "DsqP"] = np.nan
     ctrack.data.loc[ctrack.data.time == time, "depth"] = np.nan
@@ -2196,13 +2306,12 @@ def startTracks(cyclones):
 '''###########################
 Track Cyclone Centers Between Two Time Steps
 ###########################'''
-def trackCyclones(cfa,cfb,ctr,maxspeed,red):
+def trackCyclones(cfa,cfb,ctr,maxdist,red,tmstep):
     '''This function tracks cyclone centers and areas between two times when
     given the cyclone fields for those two times, a cyclone track object that 
-    is updated through time 1, maximum cyclone propagation speed, a speed
-    reduction parameter, and numpy arrays of lats and longs that are the same
-    shape as the input arrays for cyclone detection. The result is an updated
-    cyclone track object and updated cyclone field object for time 2.
+    is updated through time 1, maximum cyclone propagation distance (meters), 
+    a speed reduction parameter, and the time interval (hr). The result is an 
+    updated cyclone track object and updated cyclone field object for time 2.
     
     Steps in function:
     1. Main Center Tracking
@@ -2226,9 +2335,7 @@ def trackCyclones(cfa,cfb,ctr,maxspeed,red):
     # Calculate the maximum number of cells a cyclone can move
     time1 = cf1.time
     time2 = cf2.time
-    tmstep = (time2 - time1)*24 # Assumes time is in days
-    maxdist = maxspeed*1000*tmstep # Assumes speed in km/h and tmstep in h
-    
+
     # Create helper lists:
     y2s = cf2.lats()
     x2s = cf2.longs()
@@ -2236,8 +2343,8 @@ def trackCyclones(cfa,cfb,ctr,maxspeed,red):
     sc2 = [[] for i in y2s] # stores ids of cf1 centers that were within distance to map but chose a closer cf2 center
     sc2dist = [[] for i in y2s] # stores the distance between the cf1 centers and rejected cf2 centers
     
-    lsp1s = [] # stores the lifespan of the track of each center in cf1
-    p1s = cf1.p_cent()
+    y1s, x1s = cf1.lats(), cf1.longs() # store the locations from time 1
+    p1s = list(np.array(cf1.p_edge()) - np.array(cf1.p_cent())) # store the depth from time 1
     
     ################################
     # PART 1. MAIN CENTER TRACKING #
@@ -2245,7 +2352,6 @@ def trackCyclones(cfa,cfb,ctr,maxspeed,red):
     # Loop through each center in cf1 to find matches in cf2
     for c,cyc in enumerate(cf1.cyclones):
         cyct = ct[cyc.tid] # Link the cyclone instance to its track
-        lsp1s.append(cyct.lifespan()) # store the lifespan up to now
         
         # Create a first guess for the next location of the cyclone:
         if len(cyct.data) == 1: # If cf1 represents the genesis event, first guess is no movement
@@ -2255,7 +2361,6 @@ def trackCyclones(cfa,cfb,ctr,maxspeed,red):
             latq = addLat(cyc.lat,dist2lat(float(red*cyct.data.loc[cyct.data.time == cyc.time,"v"])*tmstep))
             longq = addLong(cyc.long,dist2long(float(red*cyct.data.loc[cyct.data.time == cyc.time,"u"])*tmstep,cyc.lat,cyc.lat))
         
-        # Test every point in cf2 to see if it's within distance d of both (yq,xq) AND (y,x)
         # Test every point in cf2 to see if it's within distance d of both (yq,xq) AND (y,x)
         pdqs = [haversine(y2s[p],latq,x2s[p],longq) for p in range(len(y2s))]
         pds = [haversine(y2s[p],cyc.lat,x2s[p],cyc.long) for p in range(len(y2s))]
@@ -2301,7 +2406,7 @@ def trackCyclones(cfa,cfb,ctr,maxspeed,red):
     #########################
     # First, remove the split possibility for any time 2 center that is continued
     for id2 in range(len(sc2)):
-        if (len(sc2[id2]) > 0) and  (len(mc2[id2]) > 0):
+        if (len(sc2[id2]) > 0) and (len(mc2[id2]) > 0):
             sc2[id2], sc2dist[id2] = [], []
     
     # Check for center merges (mc) and center splits (sc)
@@ -2310,17 +2415,20 @@ def trackCyclones(cfa,cfb,ctr,maxspeed,red):
         # But if multiple cyclones from cf1 match the same cyclone from cf2 -> CENTER MERGE
         if len(mc2[id2]) > 1:
             ### DETERMINE PRIMARY TRACK ###
-            lsp1_mc2 = [lsp1s[i] for i in mc2[id2]]
+            dist1_mc2 = [haversine(y1s[i],y2s[id2],x1s[i],x2s[id2]) for i in mc2[id2]]
             p1s_mc2 = [p1s[i] for i in mc2[id2]]
             tid_mc2 = [cf1.cyclones[i].tid for i in mc2[id2]]
             
-            # Which has the longer lifetime?
-            if len(np.where(np.array(lsp1_mc2) == max(lsp1_mc2))[0]) == 1: # if one center has a longer lifespan than the others 
-                id1 = mc2[id2][np.where(np.array(lsp1_mc2) == max(lsp1_mc2))[0][0]] # find id of the max cf1 lifespan
+            # Select the closer, then deeper storm for continuation
+            
+            # Which is closest?
+            dist1min = np.where(np.array(dist1_mc2) == min(dist1_mc2))[0]
+            if len(dist1min) == 1: # if one center is closest
+                id1 = mc2[id2][dist1min[0]] # find the id of the closest
             # Which center is deepest?
-            else: # if multiple centers have the same lifespan, take the deepest
-                id1 = mc2[id2][np.where(np.array(p1s_mc2) == min(p1s_mc2))[0][0]] # find id of the max cf1 lifespan
-                # Note that if two cyclones have the same depth and lifespan, the first by id is automatically taken.
+            else: # if multiple centers are same distance, choose the greater depth
+                id1 = mc2[id2][np.where(np.array(p1s_mc2) == max(p1s_mc2))[0][0]] # find id of the max cf1 depth
+                # Note that if two cyclones have the same distance & depth, the first by id is automatically taken.
             
             # Check if ptid of id1 center is the tid of another merge candidate
             ptid1 = int(ct[cf1.cyclones[id1].tid].data.loc[ct[cf1.cyclones[id1].tid].data.time == cf1.time,"ptid"])
@@ -2557,9 +2665,8 @@ def trackCyclones(cfa,cfb,ctr,maxspeed,red):
             mcy2s = [cy for cy in cf2.cyclones if cy.parent["id"] == cy2.parent["id"]]
             mtids = [cy.tid for cy in cf2.cyclones if cy.parent["id"] == cy2.parent["id"]]
             
-            # Grab the lifespan for each track and the central pressure at time 2:
-            mp2s = [cy.p_cent for cy in mcy2s]
-            mlsps = [ct[ti].lifespan() for ti in mtids]
+            # Grab the depth and lifespan at time 2:
+            mp2s = [cy.p_edge - cy.p_cent for cy in mcy2s]
             
             # Which tracks also existed in cf1? (excludes split genesis markers)
             pr_mtids = [ti for ti in mtids if len(ct[ti].data.loc[ct[ti].data.time == time1,"type"]) > 0 \
@@ -2568,7 +2675,7 @@ def trackCyclones(cfa,cfb,ctr,maxspeed,red):
             # If none of the tracks existed in cf1 time, 
             if len(pr_mtids) == 0:
                 # then choose the deepest in cf2 time as ptid
-                ptid2 = mtids[np.where(np.array(mp2s) == min(mp2s))[0][0]]
+                ptid2 = mtids[np.where(np.array(mp2s) == max(mp2s))[0][0]]
             
             # If only one track existed in cf1 time,
             elif len(pr_mtids) == 1:
@@ -2577,14 +2684,10 @@ def trackCyclones(cfa,cfb,ctr,maxspeed,red):
             
             # If more than one track existed in cf1 time,
             else:
-                # identify which track is longest
-                if len(np.where(np.array(mlsps) == max(mlsps))[0]) == 1: # if one center has a longer lifespan than the others 
-                    tid2 = mtids[np.where(np.array(mlsps) == max(mlsps))[0][0]] # find tid of the max in lifespan
-                # Which center is lowest pressure?
-                else: # if multiple centers have the same lifespan, take the lowest pressure
-                    mp2s_pr = [float(ct[ti].data.loc[ct[ti].data.time == time2,"p_cent"]) for ti in pr_mtids]
-                    tid2 = mtids[np.where(np.array(mp2s) == min(mp2s_pr))[0][0]] # find id of the max cf2 lifespan
-                # Note that if two cyclones have the same depth and lifespan, the first by id is automatically taken.
+                # Assign the center with the greatest depth
+                mp2s_pr = [float(ct[ti].data.loc[ct[ti].data.time == time2,"depth"]) for ti in pr_mtids]
+                tid2 = mtids[np.where(np.array(mp2s) == max(mp2s_pr))[0][0]] # find id of the max cf2 depth
+                # Note that if two cyclones have the same depth, the first by id is automatically taken.
                 try:
                     ptid2 = int(ct[tid2].data.loc[ct[tid2].data.time == time2,"ptid"]) # identify its ptid as ptid for system
                 except: 
@@ -2683,7 +2786,7 @@ def realignPriorTID(ct,cf1):
 '''###########################
 Convert Cyclone Center Tracks to Cyclone System Tracks
 ###########################'''
-def cTrack2sTrack(ct,cs0=[],dateref=[1900,1,1,0,0,0],rg=0):
+def cTrack2sTrack(ct,cs0=[],dateref=[1900,1,1,0,0,0],rg=0,lyb=1,dpy=365):
     '''Cyclone tracking using the trackCyclones function is performed on 
     cyclone centers, including secondary centers.  But since the primary
     center of a cyclone at timestep 1 might not share the same track as the 
@@ -2706,9 +2809,9 @@ def cTrack2sTrack(ct,cs0=[],dateref=[1900,1,1,0,0,0],rg=0):
     (ct -> cs) and an updated one for the prior month (cs0 -> cs0)
     '''
     # Define month
-    mt = timeAdd(dateref,[0,0,list(ct[0].data.time)[-1],0,0,0],lys=1)
+    mt = timeAdd(dateref,[0,0,list(ct[0].data.time)[-1],0,0,0])
     mt[2], mt[3], mt[4], mt[5] = 1, 0, 0, 0
-    days = daysBetweenDates(dateref,mt,lys=1)
+    days = daysBetweenDates(dateref,mt,lyb,dpy)
     
     cs = []
     
@@ -2720,23 +2823,25 @@ def cTrack2sTrack(ct,cs0=[],dateref=[1900,1,1,0,0,0],rg=0):
             cs.append(systemtrack(t.data,t.events,t.tid,len(cs),t.ftid)) # Append to system track list
         
         # If ptid is never equal to tid, the track is always secondary, so ignore it
-        elif sum(ptidtest) < len(t.data.loc[t.data.type != 0]): # Otherwise...
+        # But if the ptid is sometimes equal to the tid, the track needs to be split up
+        elif sum(ptidtest) < len(t.data.loc[t.data.type != 0]): 
             # Start empty data frames for data and events:
             data = pd.DataFrame()
             events = pd.DataFrame()
             # Observe each time...
+            
             for r in t.data.time:
+                rdata = t.data.loc[t.data.time == r] # Pull out the row for this time
+                
                 # If the track is indepedent at this time step:
-                if ( (t.tid == int(t.data.loc[t.data.time == r,"ptid"])) or \
-                    (t.ftid == int(t.data.loc[t.data.time == r,"ptid"])) ) and \
-                    int(t.data.loc[t.data.time == r,"type"]) != 0:
+                if ( (t.tid == int(rdata["ptid"])) or (t.ftid == int(rdata["ptid"])) ) and ( int(rdata["type"]) != 0 ):
                     # Append the row to the open system
-                    data = data.append(t.data.loc[t.data.time == r], ignore_index=1, sort=1)
+                    data = data.append(rdata, ignore_index=1, sort=1)
                     events = events.append(t.events.loc[t.events.time == r], ignore_index=1, sort=1)
                 
                 elif len(data) > 0:
                     # Append the row to the open system
-                    data = data.append(t.data.loc[t.data.time == r], ignore_index=1, sort=1)
+                    data = data.append(rdata, ignore_index=1, sort=1)
                     events = events.append(t.events.loc[t.events.time == r], ignore_index=1, sort=1)
                     # Close the system by adding it to the cs list
                     cs.append(systemtrack(data,events,t.tid,len(cs),t.ftid))
@@ -2745,9 +2850,6 @@ def cTrack2sTrack(ct,cs0=[],dateref=[1900,1,1,0,0,0],rg=0):
                     # Create a new open system:
                     data = pd.DataFrame()
                     events = pd.DataFrame()
-                    
-                else: # Do nothing otherwise
-                    continue
             
             # After last is reached, end the open system if it has any rows
             if len(data) > 0:
@@ -2773,24 +2875,29 @@ def cTrack2sTrack(ct,cs0=[],dateref=[1900,1,1,0,0,0],rg=0):
         otids = np.array([aa.tid for aa in cs0])
         for o in range(len(rg_otids)): # For each dead track
             # Note the position of the dead track object
-            dels.append(np.where(otids == rg_otids[o])[0][-1])
-            
-            # Extract the dead track objects
-            tDead = cs0[dels[o]] # Def of regenesis requires that primary track has experience type 3 lysis
-            
-            # Extract the regenerated track object
-            sid_cands = np.where(sys_tids == rg_tids[o])[0] # Candidate track objects
-            sid_rgcode = np.array([ np.sum(cs[sidc].data.Erg == 2) > 0 and \
-                (cs[sidc].data.loc[cs[sidc].data.Erg == 2,"time"].iloc[0] == tDead.data.time.iloc[-1]) \
-                 for sidc in sid_cands ]) # Does this track have a regeneration?
-            sid = sid_cands[np.where(sid_rgcode == 1)[0][0]] # sid of the regenerated track
-            tRegen = cs[sid]
-            
-            # Splice together with the regenerated track
-            cs[sid].data = tDead.data[:-1].append(tRegen.data.loc[tRegen.data.time >= tDead.data.time.iloc[-1]], ignore_index=1, sort=1)
-            cs[sid].events = tDead.events[:-1].append(tRegen.events.loc[(tRegen.events.time >= tDead.data.time.iloc[-1])], ignore_index=1, sort=1)
-            cs[sid].data.loc[cs[sid].data.Erg > 0,"Ely"] = 0
-            cs[sid].data.loc[cs[sid].data.Erg > 0,"Ege"] = 0
+            delids = np.where(otids == rg_otids[o])[0]
+            try: # Try linking to the prior month's track if possible
+                dels.append(delids[-1])
+                
+                # Extract the dead track objects
+                tDead = cs0[dels[o]] # Def of regenesis requires that primary track has experience type 3 lysis
+                
+                # Extract the regenerated track object
+                sid_cands = np.where(sys_tids == rg_tids[o])[0] # Candidate track objects
+                sid_rgcode = np.array([ np.sum(cs[sidc].data.Erg == 2) > 0 and \
+                    (cs[sidc].data.loc[cs[sidc].data.Erg == 2,"time"].iloc[0] == tDead.data.time.iloc[-1]) \
+                     for sidc in sid_cands ]) # Does this track have a regeneration?
+                
+                sid = sid_cands[np.where(sid_rgcode == 1)[0][0]] # sid of the regenerated track
+                tRegen = cs[sid]
+                
+                # Splice together with the regenerated track
+                cs[sid].data = tDead.data[:-1].append(tRegen.data.loc[tRegen.data.time >= tDead.data.time.iloc[-1]], ignore_index=1, sort=1)
+                cs[sid].events = tDead.events[:-1].append(tRegen.events.loc[(tRegen.events.time >= tDead.data.time.iloc[-1])], ignore_index=1, sort=1)
+                cs[sid].data.loc[cs[sid].data.Erg > 0,"Ely"] = 0
+                cs[sid].data.loc[cs[sid].data.Erg > 0,"Ege"] = 0
+            except:
+                continue
         
         # CLEAN UP
         # Remove the dead tracks from the current month
@@ -2841,38 +2948,38 @@ def cTrack2sTrack(ct,cs0=[],dateref=[1900,1,1,0,0,0],rg=0):
 '''###########################
 Write a Numpy Array to File Using a Gdal Object as Reference
 ###########################'''
-def writeNumpy_gdalObj(npArrays,outName,gdalObj,dtype=gdal.GDT_Byte):
-    '''Write a numpy array or list of arrays to a raster file using a gdal object for geographic information.
-    If a list of arrays is provided, each array will be a band in the output.
+# def writeNumpy_gdalObj(npArrays,outName,gdalObj,dtype=gdal.GDT_Byte):
+#     '''Write a numpy array or list of arrays to a raster file using a gdal object for geographic information.
+#     If a list of arrays is provided, each array will be a band in the output.
     
-    npArrays = The numpy array or list of arrays to write to disk.  All arrays must have the same dimensions.\n
-    outName = The name of the output (string)\n
-    gdalObj = An object of osgeo.gdal.Dataset class\n
-    dtype = The data type for each cell; 8-bit by default (0 to 255)
-    '''
-    # If a single array, convert to 1-element list:
-    if str(type(npArrays)) != "<type 'list'>":
-        npArrays = [npArrays]
+#     npArrays = The numpy array or list of arrays to write to disk.  All arrays must have the same dimensions.\n
+#     outName = The name of the output (string)\n
+#     gdalObj = An object of osgeo.gdal.Dataset class\n
+#     dtype = The data type for each cell; 8-bit by default (0 to 255)
+#     '''
+#     # If a single array, convert to 1-element list:
+#     if str(type(npArrays)) != "<type 'list'>":
+#         npArrays = [npArrays]
         
-    # Convert any non-finite values to -99:
-    for i in range(len(npArrays)): # for each band...
-        npArrays[i] = np.where(np.isfinite(npArrays[i]) == 0, -99, npArrays[i])
+#     # Convert any non-finite values to -99:
+#     for i in range(len(npArrays)): # for each band...
+#         npArrays[i] = np.where(np.isfinite(npArrays[i]) == 0, -99, npArrays[i])
     
-    # Create and register driver:
-    driver = gdalObj.GetDriver()
-    driver.Register()
+#     # Create and register driver:
+#     driver = gdalObj.GetDriver()
+#     driver.Register()
     
-    # Create file:
-    outFile = driver.Create(outName,npArrays[0].shape[1],npArrays[0].shape[0],len(npArrays),dtype) # Create file
-    for i in range(len(npArrays)): # for each band...
-        outFile.GetRasterBand(i+1).WriteArray(npArrays[i],0,0) # Write array to file
-        outFile.GetRasterBand(i+1).ComputeStatistics(False) # Compute stats for display purposes
-    outFile.SetGeoTransform(gdalObj.GetGeoTransform()) # Set geotransform (those six needed values)
-    outFile.SetProjection(gdalObj.GetProjection())  # Set projection
+#     # Create file:
+#     outFile = driver.Create(outName,npArrays[0].shape[1],npArrays[0].shape[0],len(npArrays),dtype) # Create file
+#     for i in range(len(npArrays)): # for each band...
+#         outFile.GetRasterBand(i+1).WriteArray(npArrays[i],0,0) # Write array to file
+#         outFile.GetRasterBand(i+1).ComputeStatistics(False) # Compute stats for display purposes
+#     outFile.SetGeoTransform(gdalObj.GetGeoTransform()) # Set geotransform (those six needed values)
+#     outFile.SetProjection(gdalObj.GetProjection())  # Set projection
     
-    outFile = None
+#     outFile = None
     
-    return
+#     return
 
 '''###########################
 Calculate the Mean Array of a Set of Arrays
@@ -3091,13 +3198,11 @@ Aggregate Track-wise Stats for a Month of Cyclone Tracks
 ###########################'''
 def aggregateTrackWiseStats(trs,date,shape):
     '''Aggregates cyclone stats that have a single value for each track:
-    genesis and lysis time, max propagation speed, max deepening rate, 
-    max depth, min central pressure, max laplacian of central pressure,
-    lifespan, track length, average area, and whether its a MCC. Returns a 
-    list containing a) a pandas dataframe of stats for the month and b) five 
-    numpy arrays for the frequency of the extremes at each location in the
-    order: max propagation speed, max deepening rate, max depth, 
-    min central pressure, max laplacian of central pressure
+    max propagation speed, max deepening rate, max depth, min central pressure, 
+    max laplacian of central pressure. Returns a list containing five numpy 
+    arrays for the frequency of the extremes at  each location in the order: 
+    max propagation speed, max deepening rate, 
+    max depth, min central pressure, max laplacian of central pressure
     
     trs = List of cyclone track objects for current month
     date = A date in the format [Y,M,D] or [Y,M,D,H,M,S]
@@ -3108,10 +3213,6 @@ def aggregateTrackWiseStats(trs,date,shape):
     maxuv_field, maxdpdt_field, maxdep_field, minp_field, maxdsqp_field = \
     np.zeros(shape),np.zeros(shape),np.zeros(shape),np.zeros(shape),np.zeros(shape)
     
-    statsPDF = pd.DataFrame(columns=["year","month","timeBegin","timeEnd",\
-    "maxUV","maxDpDt","maxDep","maxDsqP","minP","lifespan","trlength",\
-    "avgArea","MCC","CAP"])
-
     # Look at each track and aggregate stats
     for tr in trs:
         # Collect Track-Wise Stats
@@ -3130,16 +3231,8 @@ def aggregateTrackWiseStats(trs,date,shape):
         trminp = tr.minP()
         for i in range(len(trminp[1])):
             minp_field[trminp[2][i],trminp[3][i]] = minp_field[trminp[2][i],trminp[3][i]] + 1
-        
-        # Store Stats in DF
-        row = pd.DataFrame([dict(maxUV=trmaxuv[0],maxDpDt=trmaxdpdt[0],maxDsqP=trmaxdsqp[0],maxDep=trmaxdep[0],\
-            minP=trminp[0],lifespan=tr.lifespan(),trlength=tr.trackLength(),avgArea=tr.avgArea(),MCC=tr.mcc(),\
-            timeBegin=np.min(tr.data.time),timeEnd=np.max(tr.data.time),\
-            CAP=np.nansum(tr.data.loc[tr.data.type != 0,"precip"]),\
-            year=date[0],month=date[1]), ])
-        statsPDF = statsPDF.append(row, ignore_index=1, sort=1)
     
-    return [statsPDF, maxuv_field, maxdpdt_field, maxdep_field, minp_field, maxdsqp_field]
+    return [maxuv_field, maxdpdt_field, maxdep_field, minp_field, maxdsqp_field]
 
 '''###########################
 Aggregate Point-wise Stats for a Month of Cyclone Tracks
@@ -3225,9 +3318,9 @@ def aggregatePointWiseStats(trs,n,shape):
         dpdr_fieldAvg, dpdt_fieldAvg, pcent_fieldAvg, dsqp_fieldAvg]
 
 '''###########################
-Aggregate Fields the Exist for Each Time Step in a Month of Cyclone Tracking
+Aggregate Fields that Exist for Each Time Step in a Month of Cyclone Tracking
 ###########################'''
-def aggregateTimeStepFields(inpath,trs,mt,timestep,dateref=[1900,1,1,],lys=1):
+def aggregateTimeStepFields(inpath,trs,mt,timestep,dateref=[1900,1,1,],lyb=1,dpy=365):
     '''Aggregates fields that exist for each time step in a month of cyclone
     tracking data. Returns a list of numpy arrays.
     
@@ -3257,16 +3350,16 @@ def aggregateTimeStepFields(inpath,trs,mt,timestep,dateref=[1900,1,1,],lys=1):
     cf = pd.read_pickle(inpath[:-7]+"/CycloneFields/"+str(t[0])+"/"+months[t[1]-1]+"/CF"+date+".pkl")
     fieldAreas = 0*cf.fieldAreas
     
-    while t != timeAdd(mt,monthstep,lys):
+    while t != timeAdd(mt,monthstep):
         date = str(t[0])+mons[t[1]-1]+days[t[2]-1]+"_"+hours[t[3]]
         
         # Load Cyclone Field for this time step
         cf = pd.read_pickle(inpath[:-7]+"/CycloneFields/"+str(t[0])+"/"+months[t[1]-1]+"/CF"+date+".pkl")
-        cAreas, nC = scipy.ndimage.measurements.label(cf.fieldAreas)
+        cAreas, nC = ndimage.measurements.label(cf.fieldAreas)
         
         # For each track...
         for tr in trs:
-            d = daysBetweenDates(dateref,t)
+            d = daysBetweenDates(dateref,t,lyb,dpy)
             try:
                 x = int(tr.data.loc[(tr.data.time == d) & (tr.data.type != 0),"x"].iloc[0])
                 y = int(tr.data.loc[(tr.data.time == d) & (tr.data.type != 0),"y"].iloc[0])
@@ -3279,7 +3372,7 @@ def aggregateTimeStepFields(inpath,trs,mt,timestep,dateref=[1900,1,1,],lys=1):
         
         # Increment time step
         tcount = tcount+1
-        t = timeAdd(t,timestep,lys)
+        t = timeAdd(t,timestep,lyb,dpy)
     return [fieldAreas/tcount]
 
 '''###########################
@@ -3305,16 +3398,13 @@ def haversine(lats1, lats2, longs1, longs2, units="meters"):
     d = R*c
     
     # Conversions:
-    km = ["km","Km","KM","kms","Kms","KMS","kilometer","kilometre","Kilometer",\
-    "Kilometre","kilometers","kilometres","Kilometers","Kilometres"]
-    ft = ["ft","FT","feet","Feet"]
-    mi = ["mi","MI","miles","Miles"]
-    
-    if units in ft:
-        d = d*3.28084
-    elif units in km:
+    if units.lower() in ["m","meters","metres","meter","metre"]:
+        d = d
+    elif units.lower() in ["km","kms","kilometer","kilometre","kilometers","kilometres"]:
         d = d/1000
-    elif units in mi:
+    elif units.lower() in ["ft","feet"]:
+        d = d*3.28084
+    elif units.lower() in ["mi","miles"]:
         d = d*0.000621371
     
     return d
@@ -3380,10 +3470,45 @@ def toDiscreteArray(inArray, breaks):
     
     return outArray
 
+'''##########################
+Linear Model (OLS Regression) for 3-D array with shape (t,y,x)
+##########################'''
+def lm(x,y,minN=10):
+    '''Calculates a ordinary least squares regression model. Designed
+    specifically for quick batch trend analayses.  Does not consider any
+    autoregression.\n
+    
+    x = the time variable (a list or 1-D numpy array)\n
+    y = the dependent variable (a 3-D numpy array where axis 0 is the time axis)\n
+    minN = minimum number of non-NaN values required for y in the x dimension 
+    (e.g., number of years with valid data)\n
+
+    returns 5 numpy arrays with the same dimensions as axis 1 and axis 2 of y:
+    b (the slope coefficient), a (the intercept coefficient), r^2, 
+    p-value for b, and standard error for b
+    '''
+    # Create empty arrays for output
+    b, a, r, p, se = np.zeros_like(y[0])*np.nan, np.zeros_like(y[0])*np.nan, np.zeros_like(y[0])*np.nan, np.zeros_like(y[0])*np.nan, np.zeros_like(y[0])*np.nan
+    
+    # Find locations with at least minN finite values
+    n = np.isfinite(y).sum(axis=0)
+    validrows, validcols = np.where( n >= minN )
+    
+    # For each row/col
+    for i in range(validrows.shape[0]):
+        ro, co = validrows[i], validcols[i]
+        
+        yin = y[:,ro,co]
+        
+        # Create a linear model
+        b[ro,co], a[ro,co], r[ro,co], p[ro,co], se[ro,co] =  stats.linregress(x[np.isfinite(yin)],yin[np.isfinite(yin)])
+    
+    return b, a, r*r, p, se
+
 '''#########################
 Compare Tracks from Different Datasets
 #########################'''
-def comparetracks(trs1,trs2,trs2b,date1,refdate=[1900,1,1,0,0,0],minmatch=0.6,maxsep=500,system=True):
+def comparetracks(trs1,trs2,trs2b,date1,refdate=[1900,1,1,0,0,0],minmatch=0.6,maxsep=500,system=True,lyb=1,dpy=365):
     '''This function performs a track-matching comparison between two different
     sets of tracks. The tracks being compared should be from the same month and 
     have the same temporal resolution. They should differ based on input data,
@@ -3411,12 +3536,12 @@ def comparetracks(trs1,trs2,trs2b,date1,refdate=[1900,1,1,0,0,0],minmatch=0.6,ma
     system = whether comparison is between system tracks or cyclone tracks;
         default is True, meaning that system tracks are being compared.
     '''
-    refday = daysBetweenDates(refdate,date1)
-    timeb = timeAdd(date1,[0,-1,0])
+    refday = daysBetweenDates(refdate,date1,lyb,dpy)
+    timeb = timeAdd(date1,[0,-1,0],lyb,dpy)
     
     ##### System Tracks #####
     if system == True:
-        pdf = pd.DataFrame(columns=["Year1","Month1","sid1","Num_Matches","Year2","Month2","sid2","Dist","pcentDiff","areaDiff","depthDiff","dsqpDiff"])
+        pdf = pd.DataFrame()
              
         # For each track in version 1, find all of the version 2 tracks that overlap at least *minmatch* (e.g. 60%) of the obs times
         for i1 in range(len(trs1)):
@@ -3523,7 +3648,7 @@ def comparetracks(trs1,trs2,trs2b,date1,refdate=[1900,1,1,0,0,0],minmatch=0.6,ma
         
     ####### Cyclone Tracks #######
     else:
-        pdf = pd.DataFrame(columns=["Year1","Month1","tid1","Num_Matches","Year2","Month2","tid2","Dist","pcentDiff","areaDiff","depthDiff","dsqpDiff"])
+        pdf = pd.DataFrame()
            
         # For each track in version 1, find all of the version 2 tracks that overlap at least *minmatch* (e.g. 60%) of the obs times
         for i1 in range(len(trs1)):

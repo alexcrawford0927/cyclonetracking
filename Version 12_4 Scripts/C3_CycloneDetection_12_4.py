@@ -3,6 +3,7 @@ Author: Alex Crawford
 Date Created: 20 Jan 2015
 Date Modified: 10 Sep 2020 -> Branch from 12_1 --> kernel size is now based on km instead of cells
                 16 Dec 2020 --> updated comments
+                13 Jan 2021 --> change in when masking for elevation happens -- after minima are detected, not before
 Purpose: Given a series of sea level pressure fields in netcdf files, this 
     script performs several steps:
     1) Identify closed low pressure centers at each time step
@@ -31,7 +32,7 @@ import copy
 import pandas as pd
 import numpy as np
 import netCDF4 as nc
-import CycloneModule_12_2 as md
+import CycloneModule_12_4 as md
 
 np.seterr(all='ignore') # This mutes warnings from numpy
 
@@ -41,8 +42,8 @@ Set up Environment
 print("Setting up environment")
 path = "/Volumes/Cressida"
 dataset = "ERA5"
-verd = "12_TE5" # Detection Version
-vert = 'TEST' # Tracking Version
+verd = "12_4E5" # Detection Version
+vert = 'P' # Tracking Version
 spres = 100 # Spatial resolution (in km)
 
 inpath = path+"/"+dataset+"/SLP_EASE2_N0_"+str(spres)+"km"
@@ -55,7 +56,7 @@ Define Variables/Parameters
 print("Defining parameters")
 # File Variables
 invar = "SLP"
-ncvar = "msl"
+ncvar = "SLP"
 
 # Time Variables 
 starttime = [1979,1,1,0,0,0] # Format: [Y,M,D,H,M,S]
@@ -194,8 +195,6 @@ elev = projnc['z'][:]
 # Generate mask based on latitude and elevation
 mask = np.where((elev > maxelev) | (np.abs(lats) < minlat),np.nan,0)
 
-t = copy.deepcopy(starttime)
-
 # Convert kernel size to grid cells
 kSize = int(2*kSizekm/spres)+1
 
@@ -208,7 +207,6 @@ params = dict({"path":trkpath,"timestep":timestep, "dateref":dateref, "minsurf":
     "d_dist":d_dist, "maxelev":maxelev, "minlat":minlat, "contint":contint, 
     "mcctol":mcctol, "mccdist":mccdist, "maxspeed":maxspeed, "red":red, "spres":spres})
 pd.to_pickle(params,trkpath+"/cycloneparams.pkl")
-del params
 
 ##### The actual detection and tracking #####
 print("Cyclone Detection & Tracking")
@@ -220,6 +218,7 @@ ncf = nc.Dataset(inpath+"/"+dataset+"_EASE2_N0_"+str(spres)+"km_"+invar+"_Hourly
 tlist = ncf['time'][:].data
 cflist = []
 
+t = copy.deepcopy(starttime)
 while t != endtime:
     # Extract date
     Y = str(t[0])
@@ -234,17 +233,14 @@ while t != endtime:
         surf = ncf[ncvar][np.where(tlist == md.daysBetweenDates(dateref,t)*24)[0][0],:,:]
         surf = np.where((surf < minsurf) | (surf > maxsurf), np.nan, surf)
         
-        # Mask elevation if desired
-        surfMask = surf+mask
-        
         # Create a cyclone field object
         cf = md.cyclonefield(md.daysBetweenDates(dateref,t))
         
         # Identify cyclone centers
-        cf.findCenters(surf, surfMask, kSize, nanThresh, d_slp, d_dist, yDist, xDist, lats, lons) # Identify Cyclone Centers
+        cf.findCenters(surf, mask, kSize, nanThresh, d_slp, d_dist, yDist, xDist, lats, lons) # Identify Cyclone Centers
 
         # Calculate cyclone areas (and MCCs)
-        cf.findAreas(surfMask, contint, mcctol, mccdist, lats, lons, kSize) # Calculate Cyclone Areas
+        cf.findAreas(surf+mask, contint, mcctol, mccdist, lats, lons, kSize) # Calculate Cyclone Areas
     
         pd.to_pickle(cf,detpath+"/CycloneFields/"+Y+"/"+MM+"/CF"+date+".pkl")
 
