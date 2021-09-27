@@ -29,7 +29,7 @@ Set up Environment
 *******************************************'''
 BBoxNum = "" # Use "BBox##" or "" if no subset
 path = "/Volumes/Cressida"
-version = "12_4E5P"
+version = "12_4TestTracks"
 inpath = path+"/CycloneTracking/tracking"+version+"/"+BBoxNum
 regpath = path+"/Projections/EASE2_N0_25km_GenesisRegions.pkl"
 

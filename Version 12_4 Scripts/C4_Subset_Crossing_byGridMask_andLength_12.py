@@ -40,7 +40,7 @@ def maxDistFromGenPnt(data):
 Set up Environment
 *******************************************'''
 path = "/Volumes/Cressida"
-inpath = path+"/CycloneTracking/tracking12_4E5P"
+inpath = path+"/CycloneTracking/tracking12_4TestTracks"
 outpath = inpath
 
 '''*******************************************

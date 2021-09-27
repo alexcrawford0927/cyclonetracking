@@ -37,7 +37,7 @@ Set up Environment
 print("Setting up environment.")
 bboxnum = "" # use "" if performing on all cyclones; or BBox##
 typ = "System"
-ver = "12_4E5P"
+ver = "12_4TestTracks"
 
 path = "/Volumes/Cressida"
 inpath = path+"/CycloneTracking/tracking"+ver

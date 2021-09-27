@@ -42,8 +42,8 @@ Set up Environment
 print("Setting up environment")
 path = "/Volumes/Cressida"
 dataset = "ERA5"
-verd = "12_4E5" # Detection Version
-vert = 'P' # Tracking Version
+verd = "12_4Test" # Detection Version
+vert = 'Tracks' # Tracking Version
 spres = 100 # Spatial resolution (in km)
 
 inpath = path+"/"+dataset+"/SLP_EASE2_N0_"+str(spres)+"km"

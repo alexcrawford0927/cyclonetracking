@@ -30,9 +30,9 @@ import CycloneModule_12_4 as md
 Set up Environment
 *******************************************'''
 print("Setting up environment.")
-BBox = "" # use "" if performing on all cyclones
+subset = "" # use "" if performing on all cyclones
 
-inpath = "/Volumes/Cressida/CycloneTracking/tracking12_4E5P/"+BBox
+inpath = "/Volumes/Cressida/CycloneTracking/tracking12_4TestTracks/"+subset
 outpath = inpath
 
 '''*******************************************
@@ -67,12 +67,12 @@ while mt != endtime:
     print (" " + Y + " - " + M)
     
     # Load Cyclone Tracks
-    ct = pd.read_pickle(inpath+"/CycloneTracks/"+Y+"/"+BBox+"cyclonetracks"+Y+M+".pkl")
+    ct = pd.read_pickle(inpath+"/CycloneTracks/"+Y+"/"+subset+"cyclonetracks"+Y+M+".pkl")
     
     # Create System Tracks
     if mt == reftime:
         cs, cs0 = md.cTrack2sTrack(ct,[],dateref,rg)
-        pd.to_pickle(cs,inpath+"/SystemTracks/"+Y+"/"+BBox+"systemtracks"+Y+M+".pkl")
+        pd.to_pickle(cs,inpath+"/SystemTracks/"+Y+"/"+subset+"systemtracks"+Y+M+".pkl")
     
     else:
         # Extract date for previous month
@@ -81,12 +81,12 @@ while mt != endtime:
         M0 = mons[mt0[1]-1]
         
         # Load previous month's system tracks
-        cs0 = pd.read_pickle(inpath+"/SystemTracks/"+Y0+"/"+BBox+"systemtracks"+Y0+M0+".pkl")
+        cs0 = pd.read_pickle(inpath+"/SystemTracks/"+Y0+"/"+subset+"systemtracks"+Y0+M0+".pkl")
         
         # Create system tracks
         cs, cs0 = md.cTrack2sTrack(ct,cs0,dateref,rg)
-        pd.to_pickle(cs,inpath+"/SystemTracks/"+Y+"/"+BBox+"systemtracks"+Y+M+".pkl")
-        pd.to_pickle(cs0,inpath+"/SystemTracks/"+Y0+"/"+BBox+"systemtracks"+Y0+M0+".pkl")
+        pd.to_pickle(cs,inpath+"/SystemTracks/"+Y+"/"+subset+"systemtracks"+Y+M+".pkl")
+        pd.to_pickle(cs0,inpath+"/SystemTracks/"+Y0+"/"+subset+"systemtracks"+Y0+M0+".pkl")
     
     # Increment Time Step
     mt = md.timeAdd(mt,monthstep)
