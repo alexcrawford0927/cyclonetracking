@@ -34,6 +34,8 @@ Start Version 12_4 (Branch from 12_2)
 28 Apr 2021 --> Add linear regression function
 05 May 2021 --> Remove "columns=" statements from initiation of empty pandas dataframes
 29 May 2021 --> Fixed bug in linear regression function
+05 Aug 2021 --> Added flexibility to circleKernel function so that the masked value can be NaN or 0
+05 Oct 2021 --> Fixed bug in 360-day calendar calculations
 '''
 __version__ = "12.4"
 
@@ -956,12 +958,12 @@ def timeAdd(time1,time2,lys=1,dpy=365):
                 
                 else: # if the number of days is positive and will carry over to another year...
                     yrsA = yrsA+1
-                    dayR = monA*30 + dayA - dpy # go to Jan 1 of next year...
+                    dayR = (monA-1)*30 + dayA - dpy # go to Jan 1 of next year...
                     
                     yrsA = yrsA + int(dayR/dpy) # add years
                     dayR = dayR%dpy # find new day-of-year
 
-                    monR = int(dayR/30) # add months
+                    monR = int(dayR/30) + 1 # add months
                     dayR = dayR%30 # find new day-of-month
                     
             elif dayA == 0: # if the number of days is 0
@@ -1216,12 +1218,14 @@ def ringDistance(ydist, xdist, rad):
 '''###########################
 Circle Kernel Creation
 ###########################'''
-def circleKernel(r):
+def circleKernel(r,masked_value=np.nan):
     '''Given the radius in numpy array cells, this function will calculate a 
-    numpy array of 1 and nans where 1 is the cells whose centroids are less than 
-    the radius away from the center centroid.
+    numpy array of 1 and some other value where 1 is the cells whose centroids 
+    are less than the radius away from the center centroid.
     
     r = radius in numpy array cells (integer or float)
+    masked_value = value to use for cells whose centroids are more than r
+    distnace away from the center centroid. np.nan by default
     '''
     # Create a numpy array of 1s:
     rc = int(np.ceil(r))
@@ -1231,7 +1235,7 @@ def circleKernel(r):
         for col in range(0,k):
             d = ((row-rc)**2 + (col-rc)**2)**0.5
             if d > r:
-                circleMask[row,col]=np.NaN
+                circleMask[row,col]=masked_value
     return circleMask
 
 '''###########################

@@ -3,8 +3,11 @@ Author: Alex Crawford
 Date Created: 10 Mar 2019
 Date Modified: 22 Aug 2019 -- Update for Python 3
                01 Apr 2020 -- Switched output to netCDF instead of GeoTIFF;
-                               no longer dependent on gdal module
+                               no longer dependent on gdal module (start V5)
                19 Oct 2020 -- pulled the map creation out of the for loop
+               06 Oct 2021 -- added a wrap-around for inputs that prevents 
+                              empty cells from forming along either 180° or 
+                              360° longitude (start V6)
 
 Purpose: Reads in netcdf files & reprojects to the NSIDC EASE2 Grid North.
 '''    
@@ -17,7 +20,7 @@ import os
 import numpy as np
 from netCDF4 import Dataset
 import xesmf as xe
-import CycloneModule_12_2 as md
+import CycloneModule_12_4 as md
 
 '''********************
 Define Variables
@@ -33,8 +36,8 @@ nctvar = "time"
 ncext = '.nc'
 
 # Time Variables
-ymin, ymax = 2020, 2020
-mmin, mmax = 12, 12
+ymin, ymax = 1979, 1979
+mmin, mmax = 1, 1
 dmin, dmax = 1, 31 
 
 mons = ["01","02","03","04","05","06","07","08","09","10","11","12"]
@@ -43,13 +46,13 @@ timestep = 1 # in hours
 startdate = [1900,1,1] # The starting date for the reanalysis time steps
 
 # Inputs for reprojection
-xsize, ysize = 50000, -50000 # in meters
-nx, ny = 360, 360 # number of grid cells; use 180 by 180 for 100 km grid
+xsize, ysize = 100000, -100000 # in meters
+nx, ny = 180, 180 # number of grid cells; use 180 by 180 for 100 km grid
 
 # Path Variables
 path = "/Volumes/Cressida"
-inpath = path+"/"+ra+"/"+var # path+"/"+ra+"/"+var+"_T319" # 
-outpath = "/Volumes/Cressida/"+ra+"/"+var+"_EASE2_N0_"+str(int(xsize/1000))+"km" # path+"/"+ra+"/"+var+"_T319_EASE2_N0_"+str(int(xsize/1000))+"km" # 
+inpath = path+"/"+ra+"/"+var #
+outpath = "/Volumes/Cressida/"+ra+"/"+var+"_EASE2_N0_"+str(int(xsize/1000))+"km" # 
 suppath = path+"/Projections"
 
 '''*******************************************
@@ -77,8 +80,7 @@ outlon = outprjnc['lon'][:].data
 ref_netcdf.close()
 
 # Define Grids as Dictionaries
-grid_in = {'lon': lons, 'lat': lats}
-
+grid_in = {'lon': np.r_[lons,lons[0]], 'lat': lats}
 grid_out = {'lon': outlon, 'lat': outlat}
 
 # Create Regridder
@@ -133,7 +135,8 @@ for y in years:
                     inArr = nc.variables[ncvar][np.where(tlist == timeH)[0][0],:,:]
                     
                     # Transform data
-                    outArr = regridder(inArr)
+                    outArr = regridder(np.c_[inArr,inArr[:,0]])
+                    outArr[outlat < 0] = np.nan # Limits to Northern Hemisphere
                                         
                     # Add to list
                     mlist.append(outArr)

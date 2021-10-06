@@ -6,6 +6,7 @@ Date Modified: 21 Jun 2018 -> Switch to iloc, loc method of subsetting
 19 May 2020 --> Added automatic creation of output directory
 02 Jul 2020 --> Removed reliance on GDAL; using regions stored in netcdf file
 21 Jan 2021 --> Added dispalcement as subset option; added genesis/lysis region check
+06 Oct 2021 --> Replaced pickled regions file with a netcdf
 Purpose: Records information that summarizes each track (e.g., length, lifespan, 
 region of origin, number of merges and splits).
 '''
@@ -18,6 +19,7 @@ Import Modules
 import pandas as pd
 import os
 import numpy as np
+import netCDF4 as nc
 import CycloneModule_12_4 as md
 
 def maxDistFromGenPnt(data):        
@@ -27,11 +29,11 @@ def maxDistFromGenPnt(data):
 '''*******************************************
 Set up Environment
 *******************************************'''
-BBoxNum = "" # Use "BBox##" or "" if no subset
+BBoxNum = "BBox13" # Use "BBox##" or "" if no subset
 path = "/Volumes/Cressida"
-version = "12_4TestTracks"
+version = "12_9E5R"
 inpath = path+"/CycloneTracking/tracking"+version+"/"+BBoxNum
-regpath = path+"/Projections/EASE2_N0_25km_GenesisRegions.pkl"
+regpath = path+"/Projections/EASE2_N0_25km_GenesisRegions.nc"
 
 '''*******************************************
 Define Variables
@@ -66,7 +68,7 @@ Main Analysis
 *******************************************'''
 print("Main Analysis")
 # Load Regions
-regs = pd.read_pickle(regpath)
+regs = nc.Dataset(regpath)['reg'][:].data
 
 # Prep empty pdf
 pdf = pd.DataFrame()

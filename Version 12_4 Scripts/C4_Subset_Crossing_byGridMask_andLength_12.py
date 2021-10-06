@@ -40,7 +40,7 @@ def maxDistFromGenPnt(data):
 Set up Environment
 *******************************************'''
 path = "/Volumes/Cressida"
-inpath = path+"/CycloneTracking/tracking12_4TestTracks"
+inpath = path+"/CycloneTracking/tracking12_9E5R"
 outpath = inpath
 
 '''*******************************************
@@ -63,7 +63,7 @@ bboxnum = "10"
 bboxmain = "" # The main bbox your subsetting from; usually "" for "all cyclones", otherwise BBox##
 
 # Time Variables 
-starttime = [1979,1,1,0,0,0] # Format: [Y,M,D,H,M,S]
+starttime = [2020,1,1,0,0,0] # Format: [Y,M,D,H,M,S]
 endtime = [2021,1,1,0,0,0] # stop BEFORE this time (exclusive)
 monthstep = [0,1,0,0,0,0] # A Time step that increases by 1 mont [Y,M,D,H,M,S]
 
