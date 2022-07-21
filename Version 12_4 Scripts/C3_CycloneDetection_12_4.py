@@ -40,13 +40,14 @@ np.seterr(all='ignore') # This mutes warnings from numpy
 Set up Environment
 *******************************************'''
 print("Setting up environment")
-path = "/Volumes/Cressida"
+path = "~/Documents/UMD/Assistantship/POLARA/data"
 dataset = "ERA5"
+reprodir = "Cyclones_100km"
 verd = "12_4Test" # Detection Version
 vert = 'Tracks' # Tracking Version
 spres = 100 # Spatial resolution (in km)
 
-inpath = path+"/"+dataset+"/SLP_EASE2_N0_"+str(spres)+"km"
+inpath = path+"/"+reprodir #+"/SLP_EASE2_N0_"+str(spres)+"km"
 outpath = path+"/CycloneTracking"
 suppath = path+"/Projections/EASE2_N0_"+str(spres)+"km_Projection.nc"
 
@@ -56,11 +57,11 @@ Define Variables/Parameters
 print("Defining parameters")
 # File Variables
 invar = "SLP"
-ncvar = "SLP"
+ncvar = "msl"
 
 # Time Variables 
-starttime = [1979,1,1,0,0,0] # Format: [Y,M,D,H,M,S]
-endtime = [1979,2,1,0,0,0] # stop BEFORE this time (exclusive)
+starttime = [2006,10,1,0,0,0] # Format: [Y,M,D,H,M,S]
+endtime = [2007,5,1,0,0,0] # stop BEFORE this time (exclusive)
 timestep = [0,0,0,6,0,0] # Time step in [Y,M,D,H,M,S]
 
 dateref = [1900,1,1,0,0,0]  # [Y,M,D,H,M,S]
@@ -140,16 +141,16 @@ hours = ["0000","0100","0200","0300","0400","0500","0600","0700","0800",\
 detpath = outpath+"/detection"+verd
 trkpath = outpath+"/tracking"+verd+vert
 try:
-    os.chdir(detpath)
+    os.chdir(os.path.expanduser(detpath))
 except:
-    os.mkdir(detpath)
-    os.chdir(detpath)
+    os.mkdir(os.path.expanduser(detpath))
+    os.chdir(os.path.expanduser(detpath))
     os.mkdir("CycloneFields")
 try:
-    os.chdir(trkpath)
+    os.chdir(os.path.expanduser(trkpath))
 except:
-    os.mkdir(trkpath)
-    os.chdir(trkpath)
+    os.mkdir(os.path.expanduser(trkpath))
+    os.chdir(os.path.expanduser(trkpath))
     os.mkdir("CycloneTracks")
     os.mkdir("ActiveTracks")
     os.mkdir("SystemTracks")
@@ -159,32 +160,32 @@ for y in range(starttime[0],endtime[0]+1):
     
     # Cyclone Fields
     try:
-        os.chdir(detpath+"/CycloneFields/"+Y)
+        os.chdir(os.path.expanduser(detpath+"/CycloneFields/"+Y))
     except:
-        os.mkdir(detpath+"/CycloneFields/"+Y)
+        os.mkdir(os.path.expanduser(detpath+"/CycloneFields/"+Y))
         for mm in range(12):
-            os.mkdir(detpath+"/CycloneFields/"+Y+"/"+months[mm])
+            os.mkdir(os.path.expanduser(detpath+"/CycloneFields/"+Y+"/"+months[mm]))
     
     # Cyclone Tracks
     try:
-        os.chdir(trkpath+"/CycloneTracks/"+Y)
+        os.chdir(os.path.expanduser(trkpath+"/CycloneTracks/"+Y))
     except: 
-        os.mkdir(trkpath+"/CycloneTracks/"+Y)
+        os.mkdir(os.path.expanduser(trkpath+"/CycloneTracks/"+Y))
         
     # Active Tracks
     try:
-        os.chdir(trkpath+"/ActiveTracks/"+Y)
+        os.chdir(os.path.expanduser(trkpath+"/ActiveTracks/"+Y))
     except: 
-        os.mkdir(trkpath+"/ActiveTracks/"+Y)
+        os.mkdir(os.path.expanduser(trkpath+"/ActiveTracks/"+Y))
         
     # System Tracks
     try:
-        os.chdir(trkpath+"/SystemTracks/"+Y)
+        os.chdir(os.path.expanduser(trkpath+"/SystemTracks/"+Y))
     except: 
-        os.mkdir(trkpath+"/SystemTracks/"+Y)
+        os.mkdir(os.path.expanduser(trkpath+"/SystemTracks/"+Y))
 
 ##### Read in attributes of reference files #####
-projnc = nc.Dataset(suppath)
+projnc = nc.Dataset(os.path.expanduser(suppath))
 
 lats = projnc['lat'][:].data
 lons = projnc['lon'][:].data
@@ -206,7 +207,7 @@ params = dict({"path":trkpath,"timestep":timestep, "dateref":dateref, "minsurf":
     "maxsurf":maxsurf,"kSize":kSize, "nanThresh":nanThresh, "d_slp":d_slp, \
     "d_dist":d_dist, "maxelev":maxelev, "minlat":minlat, "contint":contint, 
     "mcctol":mcctol, "mccdist":mccdist, "maxspeed":maxspeed, "red":red, "spres":spres})
-pd.to_pickle(params,trkpath+"/cycloneparams.pkl")
+pd.to_pickle(params,os.path.expanduser(trkpath+"/cycloneparams.pkl"))
 
 ##### The actual detection and tracking #####
 print("Cyclone Detection & Tracking")
@@ -214,7 +215,7 @@ print("Cyclone Detection & Tracking")
 print(' Elapsed time:',round(time.perf_counter()-start,2),'seconds -- Starting first month')
 
 # Load netcdf for initial time
-ncf = nc.Dataset(inpath+"/"+dataset+"_EASE2_N0_"+str(spres)+"km_"+invar+"_Hourly_"+str(starttime[0])+mons[starttime[1]-1]+".nc")
+ncf = nc.Dataset(os.path.expanduser(inpath+"/"+dataset+"_EASE2_N0_"+str(spres)+"km_"+invar+"_Hourly_"+str(starttime[0])+mons[starttime[1]-1]+".nc"))
 tlist = ncf['time'][:].data
 cflist = []
 
@@ -228,7 +229,7 @@ while t != endtime:
 
     # Load surface
     try: # If the cyclone field has already been calculated, no need to repeat
-        cf = pd.read_pickle(detpath+"/CycloneFields/"+Y+"/"+MM+"/CF"+date+".pkl")
+        cf = pd.read_pickle(os.path.expanduser(detpath+"/CycloneFields/"+Y+"/"+MM+"/CF"+date+".pkl"))
     except:    
         surf = ncf[ncvar][np.where(tlist == md.daysBetweenDates(dateref,t)*24)[0][0],:,:]
         surf = np.where((surf < minsurf) | (surf > maxsurf), np.nan, surf)
@@ -242,7 +243,7 @@ while t != endtime:
         # Calculate cyclone areas (and MCCs)
         cf.findAreas(surf+mask, contint, mcctol, mccdist, lats, lons, kSize) # Calculate Cyclone Areas
     
-        pd.to_pickle(cf,detpath+"/CycloneFields/"+Y+"/"+MM+"/CF"+date+".pkl")
+        pd.to_pickle(cf,os.path.expanduser(detpath+"/CycloneFields/"+Y+"/"+MM+"/CF"+date+".pkl"))
 
     # Track Cyclones
     if t == starttime: # If this is the first time step, must initiate tracking
@@ -256,8 +257,8 @@ while t != endtime:
             cffilep = "CF"+datep+".pkl"
             
             # Load cyclone tracks and cyclone field from prior time step
-            ct = pd.read_pickle(trkpath+"/ActiveTracks/"+str(tp[0])+"/activetracks"+str(tp[0])+str(mons[tp[1]-1])+".pkl")
-            cf1 = pd.read_pickle(detpath+"/CycloneFields/"+str(tp[0])+"/"+str(months[tp[1]-1])+"/"+cffilep)
+            ct = pd.read_pickle(os.path.expanduser(trkpath+"/ActiveTracks/"+str(tp[0])+"/activetracks"+str(tp[0])+str(mons[tp[1]-1])+".pkl"))
+            cf1 = pd.read_pickle(os.path.expanduser(detpath+"/CycloneFields/"+str(tp[0])+"/"+str(months[tp[1]-1])+"/"+cffilep))
             md.realignPriorTID(ct,cf1)
             
             # move into normal tracking
@@ -276,12 +277,12 @@ while t != endtime:
         ct, ct_inactive = md.splitActiveTracks(ct, cf1)
         
         # Export inactive tracks
-        pd.to_pickle(ct_inactive,trkpath+"/CycloneTracks/"+Y+"/cyclonetracks"+Y+M+".pkl")
-        pd.to_pickle(ct,trkpath+"/ActiveTracks/"+Y+"/activetracks"+Y+M+".pkl")
+        pd.to_pickle(ct_inactive,os.path.expanduser(trkpath+"/CycloneTracks/"+Y+"/cyclonetracks"+Y+M+".pkl"))
+        pd.to_pickle(ct,os.path.expanduser(trkpath+"/ActiveTracks/"+Y+"/activetracks"+Y+M+".pkl"))
         
         if t != endtime:
             # Load netcdf for next month
-            ncf = nc.Dataset(inpath+"/"+dataset+"_EASE2_N0_"+str(spres)+"km_"+invar+"_Hourly_"+str(t[0])+mons[t[1]-1]+".nc")
+            ncf = nc.Dataset(os.path.expanduser(inpath+"/"+dataset+"_EASE2_N0_"+str(spres)+"km_"+invar+"_Hourly_"+str(t[0])+mons[t[1]-1]+".nc"))
             tlist = ncf['time'][:].data
 
 print("Complete")
