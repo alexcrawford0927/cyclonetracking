@@ -37,7 +37,7 @@ ncext = '.nc'
 
 # Time Variables
 ymin, ymax = 2002, 2022
-mmin, mmax = 10, 4
+mmin, mmax = 1, 12
 dmin, dmax = 1, 31 
 
 mons = ["01","02","03","04","05","06","07","08","09","10","11","12"]
@@ -95,7 +95,7 @@ regridder = xe.Regridder(grid_in, grid_out, 'bilinear')
 
 print("Step 2. Set up dates of analysis")
 years = range(ymin,ymax+1)
-mos = (10,11,12,1,2,3,4) #range(mmin,mmax+1)
+mos = range(mmin,mmax+1) #(10,11,12,1,2,3,4)
 hrs = [h*timestep for h in range(int(24/timestep))] 
 # print(hrs)
 ly = md.leapyearBoolean(years) # annual boolean for leap year or not leap year

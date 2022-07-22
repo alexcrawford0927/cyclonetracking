@@ -60,8 +60,8 @@ invar = "SLP"
 ncvar = "msl"
 
 # Time Variables 
-starttime = [2006,10,1,0,0,0] # Format: [Y,M,D,H,M,S]
-endtime = [2007,5,1,0,0,0] # stop BEFORE this time (exclusive)
+starttime = [2002,10,1,0,0,0] # Format: [Y,M,D,H,M,S]
+endtime = [2022,5,1,0,0,0] # stop BEFORE this time (exclusive)
 timestep = [0,0,0,6,0,0] # Time step in [Y,M,D,H,M,S]
 
 dateref = [1900,1,1,0,0,0]  # [Y,M,D,H,M,S]
