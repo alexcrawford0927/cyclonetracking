@@ -1,6 +1,7 @@
 # cyclonetracking
-Lagrangian cyclone tracking algorithm developed while at the National Snow and Ice Data Center
-Inputs include several raster data sets: sea level pressure fields, a digital elevation model, arrays of latitude, longitude, and x and y distances across the input grid. A suite of parameters set by the user are also needed, and the algorithm assumes that the user has already a) set up some output directories and b) regridded all inputs to an equal-area grid.  Polar grids (e.g., the EASE2 grid) are ideal. An example script is included in Version 12 and 13 scripts folders that shows how ERA5 data were converted.
+The CEOS/NSIDC Extratroipcal Cyclone Tracking (CNECT) algorithm identifies cyclones as closed low pressure centers satisfying a minimum intensity threshold, then relates cyclones in successive observation times to generate tracks that record the entire life history of individual cyclone centers. The algorithm also keeps track of various intensity measures, propagation characteristics, and interactions between cyclone centers. Those interactions can be used by a follow-on code to identify multi-center storm systems, which is especially helpful when working with high-resolution data.
+
+Inputs include several raster data sets: sea level pressure fields, a digital elevation model, arrays of latitude, longitude, and x and y distances across the input grid. A suite of parameters set by the user are also needed, and unless working exclusively at latitudes lower than about 50°N, it is advised that input SLP fields be re-gridded to an equal-area polar projection (e.g., the EASE2 grid). An example script is included in Version 12 Scripts that shows how ERA5 data were converted.
 
 Please email Alex Crawford at alex.crawford -at- umanitoba.ca with questions.  If you use this algorithm, please a) let me know about the project and b) cite the paper that introduced the algortithm:
 
