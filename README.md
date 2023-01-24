@@ -3,6 +3,8 @@ The CEOS/NSIDC Extratroipcal Cyclone Tracking (CNECT) algorithm identifies cyclo
 
 Inputs include several raster data sets: sea level pressure fields, a digital elevation model, arrays of latitude, longitude, and x and y distances across the input grid. A suite of parameters set by the user are also needed, and unless working exclusively at latitudes lower than about 50°N, it is advised that input SLP fields be re-gridded to an equal-area polar projection (e.g., the EASE2 grid). An example script is included in Version 12 Scripts that shows how ERA5 data were converted.
 
+Note that if you just want to work with output from this algorithm from the historical record and don't want to run the code yourself, results using ERA5 as the input are available at https://canwin-datahub.ad.umanitoba.ca/data/project/cnect and updated periodically.
+
 Please email Alex Crawford at alex.crawford -at- umanitoba.ca with questions.  If you use this algorithm, please a) let me know about the project and b) cite the paper that introduced the algortithm:
 
 If using Version 10.x (2016):
