@@ -10,6 +10,7 @@ Date Modified: 10 Sep 2020 -> Branch from 12_1 --> kernel size is now based on k
                             entire month in each pickled file
                 14 Nov 2022 --> Added an if statement to make this more functional for the Southern Hemisphere
                 23 Jan 2023 --> Branch from 12_4 --> added kSizekm to cycloneparams.pkl and switched from "surf" to "field"
+                03 Apr 2023 --> Fixed bug in np.where() to index call when cyclone field already exists
 
 Purpose: Given a series of sea level pressure fields in netcdf files, this
     script performs several steps:
@@ -52,8 +53,8 @@ print("Setting up environment")
 path = "/Volumes/Cressida"
 dataset = "ERA5"
 verd = "13_2" # Detection Version
-vert = 'PTest' # Tracking Version
-spres = 100 # Spatial resolution (in km)
+vert = 'P' # Tracking Version
+spres = 25 # Spatial resolution (in km)
 
 inpath = path+"/"+dataset+"/SLP_EASE2_N0_"+str(spres)+"km"
 outpath = path+"/CycloneTracking"
@@ -69,7 +70,7 @@ ncvar = "msl" # 'msl' for ERA5, 'SLP' for MERRA2 & CFSR
 
 # Time Variables
 starttime = [1979,1,1,0,0,0] # Format: [Y,M,D,H,M,S]
-endtime = [1979,2,1,0,0,0] # stop BEFORE this time (exclusive)
+endtime = [2000,1,1,0,0,0] # stop BEFORE this time (exclusive)
 timestep = [0,0,0,6,0,0] # Time step in [Y,M,D,H,M,S]
 
 dateref = [1900,1,1,0,0,0]  # [Y,M,D,H,M,S]
@@ -230,7 +231,7 @@ while t != endtime:
 
     # Load field
     try: # If the cyclone field has already been calculated, no need to repeat
-        cf = cflist[np.where(cftimes == days)[0]]
+        cf = cflist[np.where(cftimes == days)[0][0]]
     except:
         field = ncf[ncvar][np.where(tlist == md.daysBetweenDates(dateref,t)*24)[0][0],:,:]
         field = np.where((field < minfield) | (field > maxfield), np.nan, field)
