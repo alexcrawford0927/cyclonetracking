@@ -10,7 +10,9 @@ Date Modified: 10 Sep 2020 -> Branch from 12_1 --> kernel size is now based on k
                             entire month in each pickled file
                 14 Nov 2022 --> Added an if statement to make this more functional for the Southern Hemisphere
                 23 Jan 2023 --> Branch from 12_4 --> added kSizekm to cycloneparams.pkl and switched from "surf" to "field"
-                03 Apr 2023 --> Fixed bug in np.where() to index call when cyclone field already exists
+                03 Apr 2023 --> Improved flexibility running the code using prior cyclone detection for a new temporal
+                            resolution while tracking -- there were some bugs if the original run was at a finer temporal resolution
+                            and a later run was at a coarser resolution
 
 Purpose: Given a series of sea level pressure fields in netcdf files, this
     script performs several steps:
@@ -69,13 +71,13 @@ invar = "SLP"
 ncvar = "msl" # 'msl' for ERA5, 'SLP' for MERRA2 & CFSR
 
 # Time Variables
-starttime = [1979,1,1,0,0,0] # Format: [Y,M,D,H,M,S]
+starttime = [1982,4,1,0,0,0] # Format: [Y,M,D,H,M,S]
 endtime = [2000,1,1,0,0,0] # stop BEFORE this time (exclusive)
 timestep = [0,0,0,6,0,0] # Time step in [Y,M,D,H,M,S]
 
 dateref = [1900,1,1,0,0,0]  # [Y,M,D,H,M,S]
 
-prior = 0 # 1 = a cyclone track object exists for a prior month; 0 = otherwise
+prior = 1 # 1 = a cyclone track object exists for a prior month; 0 = otherwise
 
 # Detection Parameters #
 minfield = 80000 # minimum reasonable value in field array
@@ -257,10 +259,15 @@ while t != endtime:
             # Identify date/time of prior timestep
             tp = md.timeAdd(t,[-i for i in timestep])
 
-            # Load cyclone tracks and cyclone field from prior time step
+            # Load cyclone tracks from prior month
             ct = pd.read_pickle(trkpath+"/ActiveTracks/"+str(tp[0])+"/activetracks"+str(tp[0])+md.dd[tp[1]-1]+".pkl")
-            cf1 = pd.read_pickle(detpath+"/CycloneFields/CF"+str(tp[0])+md.dd[tp[1]-1]+".pkl")[-1] # Note, just taking final field from prior month
 
+           # Load cyclone field from prior time step
+            cfs = pd.read_pickle(detpath+"/CycloneFields/CF"+str(tp[0])+md.dd[tp[1]-1]+".pkl")
+            cfi = np.where( np.array( [c.time for c in cfs] ) == md.daysBetweenDates(dateref,tp) )[0][0]
+            cf1 = pd.read_pickle(detpath+"/CycloneFields/CF"+str(tp[0])+md.dd[tp[1]-1]+".pkl")[cfi]
+
+            # Reset TIDs for active cyclone tracks
             md.realignPriorTID(ct,cf1)
 
             # Start normal tracking
