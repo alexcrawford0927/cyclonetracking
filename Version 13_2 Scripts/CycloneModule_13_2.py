@@ -54,25 +54,26 @@ Start Version 13_2 (Branch from 12_4)
             --> Changed sorting of main data frame to no longer always be alphabetical
             --> Added the SLP gradient measure used to limit cyclone detection as a variable in the main data frame
 18 Oct 2022 --> Added try/except statements to the cTrack2sTrack function so that it will ignore
-                cases where tids between two months don't align insted of breaking. -- previously this had only been done for same-month cyclones
+                cases where tids between two months don't align instead of breaking -- previously this had only been done for same-month cyclones
 06 Feb 2023 --> Added list for full-name months and the divbreaks function
 19 Apr 2023 --> Added Theil-Sen estimator
-            --> Added more flexible area grid calculator functions (which will eventually replace the more limited area bounding box function)
-            --> Switched all pandas .append methods to pd.concat functions
+            --> Added more flexible area grid calculator functions (which may eventually replace the more limited area bounding box function)
+            --> Switched all pandas pd.append methods to pd.concat functions
             --> Switched all pandas ignore_index=1 and sort=1 to ignore_index=True and sort=True
+8 Sep 2023 --> Updated lm function to work with scipy 1.9.0
+5 Apr 2024 --> Added regime detection function
+13 May 2024 --> Edited Mann-Kendall Test to account for both regularly and irregularly spaced x values
 
 '''
-__version__ = "13.2.1"
+__version__ = "13.2.2"
 
 import pandas as pd
 import copy
 import os
 import numpy as np
 from scipy.spatial.distance import cdist
-from scipy import ndimage
-from scipy import stats
-from scipy import special
-from scipy import interpolate
+from scipy import ndimage, special, stats, interpolate
+
 
 '''
 #################
@@ -491,7 +492,7 @@ class systemtrack:
     To make sense, the system track should be constructed directly from
     finished cyclone tracks. The difference between a system track and a
     cyclone track is that a cyclone track exists for each cyclone center,
-    whereas only one system track exists for each mcc.
+    whereas only one system track exists for each multi-center cyclone.
 
     UNITS:
     time = days
@@ -1120,7 +1121,7 @@ def dist2lat(d,units="km", r=6371.):
     '''This function converts from standard distance units to a latitudinal
     angle on a sphere when given its radius. By default, the distance is assumed
     to be in kilometers and the radius is assumed to be 6371 km (i.e., the
-    sphere is Earth). Returns the latitudinal angle in degrees. Note: this
+    Earth is a sphere). Returns the latitudinal angle in degrees. Note: this
     function only works if working strictly meridional.
     '''
     import numpy as np
@@ -1155,7 +1156,7 @@ def dist2lon(d, lat1, lat2, units="km", r=6371.):
     angle  on a sphere when given two latitudes (in degrees) and the radius of
     the sphere using the haversine formula. By default, the distance is assumed
     to be in kilometers and the radius is assumed to be 6371 km (i.e., the
-    sphere is Earth). Returns the longitudinal angle in degrees.
+    Earth is a sphere). Returns the longitudinal angle in degrees.
     '''
     import numpy as np
 
@@ -1245,7 +1246,7 @@ def rotateCoordsAroundOrigin(x1,y1,phi):
 
     Note: Typically, if you're going from lat/lon to x/y, you need to mulitply phi by -1
     (e.g., going from lat/lon to a Polar North Stereographic centered on -45° is
-     done with -1*(longitude-45)*np.pi/180)
+     done with -1*(longitude-(-45))*np.pi/180)
     '''
     # Calculate the distance from the origin:
     c = np.sqrt(np.square(y1) + np.square(x1))
@@ -1673,17 +1674,17 @@ def detectMinima(var, mask, kSize=3, nanthreshold=1):
     '''Identifies local minima in a numpy array (surface) by searching within a
     square kernel (the neighborhood) for each grid cell. Ignores nans by default.
 
-    field = a numpy array that represents some surface of interest
+    var = a numpy array that represents some surface of interest
     mask = a numpy array of 0s and NaNs used to mask results -- can repeat var
         input here if no mask exists
     kSize = kernel size (e.g., 3 means a 3*3 kernel centered on each grid cell)
     nanthreshold = maximum ratio of nan cells to total cells in the kernel for
         each minimum test. 0 means that no cell with a nan neighbor can be
-        considered a minimum. 0.5 means that less than half of the cells in the
+        considered a minimum. 0.5 means that fewer than half of the cells in the
         kernel can be nans for a cell to be considered a minimum. 1 means
         that a cell will be considered a minimum even if all cells around it
         are nan. Warning: since the center cell of the kernel is included in
-        the ratio, if you want to make decisions based on the ratio of nerighbors
+        the ratio, if you want to make decisions based on the ratio of neighbors
         that exceed some threshold, scale your desired threshold as such:
             nanthreshold = desiredthreshold * (kSize*kSize-1)/(kSize*kSize).
     '''
@@ -1700,7 +1701,7 @@ def detectMaxima(var, mask, kSize=3, nanthreshold=1):
     '''Identifies local maxima in a numpy array (surface) by searching within a
     square kernel (the neighborhood) for each grid cell. Ignores nans by default.
 
-    field = a numpy array that represents some surface of interest
+    var = a numpy array that represents some surface of interest
     mask = a numpy array of 0s and NaNs used to mask results -- can repeat var
         input here if no mask exists
     kSize = kernel size (e.g., 3 means a 3*3 kernel centered on each grid cell)
@@ -3348,7 +3349,7 @@ def areaBoundingBox(lats1, lats2, lons1, lons2, R = 6371000):
 '''###########################
 Calculate the Area Within a Set of Lat/Lon Ordered Pairs
 ###########################'''
-def polygon_area(lats, lons, radius = 6371):
+def area_latlon_green(lats, lons, radius = 6371):
     """
     Computes area of spherical polygon, assuming spherical Earth.
     Returns result in ratio of the sphere's area if the radius is specified.
@@ -3366,7 +3367,7 @@ def polygon_area(lats, lons, radius = 6371):
 
     # Line integral based on Green's Theorem, assumes spherical Earth
 
-    #close polygon
+    # Close polygon
     if lats[0]!=lats[-1]:
         lats = append(lats, lats[0])
         lons = append(lons, lons[0])
@@ -3375,22 +3376,20 @@ def polygon_area(lats, lons, radius = 6371):
     a = sin(lats/2)**2 + cos(lats)* sin(lons/2)**2
     colat = 2*arctan2( sqrt(a), sqrt(1-a) )
 
-    #azimuths relative to (0,0)
+    # Azimuths relative to (0,0)
     az = arctan2(cos(lats) * sin(lons), sin(lats)) % (2*pi)
 
     # Calculate diffs
-    # daz = diff(az) % (2*pi)
-    daz = diff(az)
-    daz = (daz + pi) % (2 * pi) - pi
+    daz = (diff(az) + pi) % (2 * pi) - pi
 
-    deltas=diff(colat)/2
-    colat=colat[0:-1]+deltas
+    deltas = diff(colat)/2
+    colat = colat[0:-1]+deltas
 
     # Perform integral
-    integrands = (1-cos(colat)) * daz
+    integrands = (1 - cos(colat)) * daz
 
     # Integrate
-    area = abs(sum(integrands))/(4*pi)
+    area = abs(sum(integrands)) / (4*pi)
     area = min(area,1-area)
 
     if radius is not None: #return in units of radius
@@ -3398,13 +3397,39 @@ def polygon_area(lats, lons, radius = 6371):
     else: #return in ratio of sphere total area
         return area
 
+def area_latlon_girard(lats,lons,R=6371):
+    '''Calculates the area of a polygon from a list of latitudes and longitudes.
+    By default, it returns units of square kilometers and uses Earth's mean radius
+    (6371 km). For different units, change the units of R in the inputs. Note that
+    this function assumes that the node (the start/end point) is only provided once,
+    so starts the calculation by linking together the last point in the lists to
+    the first points in the lists.\n\n
+
+    lats = list or array of latitudes in deg N
+    lons = list or array of longitudes in deg E
+    R = radius of Earth (default: 6371); implicitly, also the units (default: km)
+    '''
+    a = 0
+
+    for i in range(len(lats)):
+        x1 = lons[i-1]
+        x2 = lons[i]
+        y1 = lats[i-1]
+        y2 = lats[i]
+
+        a += (x2-x1)*np.pi/180*(2+np.sin(y1*np.pi/180)+np.sin(y2*np.pi/180))
+
+    area = np.abs(R*R*a/2)
+
+    return area
+
 '''###########################
 Calculate the Area Within each Gridcell of a 2-D Grid
 ###########################'''
 def polygon_area_from_latlon_grids(lats, lons, radius = 6371):
     """
     Computes area of a polygon on a spherical Earth. Returns results in the
-    units of the radius given. Latitude and ongitude can be supplied as
+    units of the radius given. Latitude and longitude can be supplied as
     either 1-D or 2-D arrays, but if 1-D, it is assumed that the data have
     a regular lat/lon grid (i.e., the data are rectilinear)
 
@@ -3508,7 +3533,7 @@ def polygon_area_from_latlon_grids(lats, lons, radius = 6371):
             if np.min(loni) < -90 and np.max(loni) > 90:
                 loni[loni < 0] = 360+loni[loni < 0]
 
-            area[ri-1,ci-1] = polygon_area(lati, loni, radius)
+            area[ri-1,ci-1] = area_latlon_girard(lati, loni, radius)
 
     # Estimate edges
     area[0,:] = area[1,:] + (area[1,:] - area[2,:])
@@ -3599,8 +3624,8 @@ def lm(x,y,minN=10):
     p-value for b, and standard error for b
     '''
     # Create empty arrays for output
-    b, a, r, p, se = np.zeros_like(y[0])*np.nan, np.zeros_like(y[0])*np.nan, np.zeros_like(y[0])*np.nan, np.zeros_like(y[0])*np.nan, np.zeros_like(y[0])*np.nan
-
+    b, a, r, p, seb, sea = [np.zeros_like(y[0])*np.nan for i in range(6)]
+    
     # Find locations with at least minN finite values
     n = np.isfinite(y).sum(axis=0)
     validrows, validcols = np.where( n >= minN )
@@ -3612,9 +3637,12 @@ def lm(x,y,minN=10):
         yin = y[:,ro,co]
 
         # Create a linear model
-        b[ro,co], a[ro,co], r[ro,co], p[ro,co], se[ro,co] =  stats.linregress(x[np.isfinite(yin)],yin[np.isfinite(yin)])
+        try:
+            b[ro,co], a[ro,co], r[ro,co], p[ro,co], seb[ro,co], sea[ro,co] =  stats.linregress(x[np.isfinite(yin)],yin[np.isfinite(yin)])
+        except:    
+            b[ro,co], a[ro,co], r[ro,co], p[ro,co], seb[ro,co] =  stats.linregress(x[np.isfinite(yin)],yin[np.isfinite(yin)])
 
-    return b, a, r*r, p, se
+    return b, a, r*r, p, seb, sea
 
 
 '''##########################
@@ -4019,14 +4047,18 @@ def theilsenslope(x,y,random_state=None,mkprecision=0):
     if len(x.shape) == 1:
 
         # Calculate p-value with Mann-Kendell test
-        interp = interpolate.interp1d(x,y,'linear')
-        mkxmin = np.true_divide( np.ceil(np.min(x)*10**(mkprecision)), 10**mkprecision)
-        mkxmax = np.true_divide( np.floor(np.max(x)*10**(mkprecision)), 10**mkprecision)
-        interval = (mkxmax-mkxmin) / (len(x)/2)
-        mk_newx = np.arange(mkxmin, mkxmax+(interval/2), interval)
-        mk_newy = interp(mk_newx)
+        if len(np.unique(x[1:] - x[:-1])) > 1: # If x values are not regularly spaced
+            interp = interpolate.interp1d(x,y,'linear')
+            mkxmin = np.true_divide( np.ceil(np.min(x)*10**(mkprecision)), 10**mkprecision)
+            mkxmax = np.true_divide( np.floor(np.max(x)*10**(mkprecision)), 10**mkprecision)
+            interval = (mkxmax-mkxmin) / (len(x)/2)
+            mk_newx = np.arange(mkxmin, mkxmax+(interval/2), interval)
+            mk_newy = interp(mk_newx)
 
-        pvalue = mk.original_test(mk_newy)[2]
+            pvalue = mk.original_test(mk_newy)[2]
+        
+        else: # If x values are regularly spaced (e.g., every year, every day)
+            pvalue = mk.original_test(y)[2]
 
         # Reshape X variable if needed
         x = x.reshape(-1,1)
@@ -4052,3 +4084,83 @@ def theilsenslope(x,y,random_state=None,mkprecision=0):
     r2 = (ToSS-ReSS) / ToSS
 
     return slope, intercept, r2, pvalue
+
+
+'''#########################
+Rodionov (2004) Regime Test
+#########################'''
+def rodionov_regimes(data, l, p):
+    """
+    Original Author: Trevor J Amestoy
+    Date Created: July 2023
+    Original Source: https://github.com/TrevorJA/Rodionov_regime_shifts/blob/main/rodionov.py
+    Date Modified by Alex Crawford: 5 Apr 2024
+    
+    Implements Rodionov's (2004) regime shift detection algorithm:
+
+    Rodionov, S. N. (2004). A sequential algorithm for testing climate regime shifts. 
+    Geophysical Research Letters, 31(9).
+
+    Args:
+        data (array): Timeseries array of std values
+        l (int): The assumed minimum regime length
+        p (float): The singificance probability to use when assessing shifts
+
+    Returns:
+        list, list: Two lists: The regime-shift indices, the RSI values 
+    """
+    # Step 1: Set the cut-off length l of the regimes
+    # l: Number of years for each regime
+    # p: Probability level for significance
+    n = len(data)
+    regime_shift_indices = []
+    rsi = np.zeros(n)
+
+    # Step 2: Determine the difference diff for statistically significant mean values
+    t_stat = np.abs(stats.t.ppf(p, (2*l-2)))
+    avg_var = np.mean([np.var(data[i:(i+l)]) for i in range(n-l)])
+    diff = t_stat * np.sqrt(2 * avg_var / l)
+
+    # Step 3: Calculate initial mean for regime R1
+    r1 = np.mean(data[:l])
+    r1_lower = r1 - diff
+    r1_upper = r1 + diff
+
+    i = l + 1
+    while i < n:
+        
+        # Step 4: Check if the value exceeds the range of R1 ± diff
+        if data[i] < r1_lower or data[i] > r1_upper:
+            j = i
+
+            # Estimate the mean of regime 2 as the upper bound of r1 distribution
+            test_r2 = r1_lower if data[i] < r1_lower else r1_upper
+            
+            # Step 5: Calculate regime shift index (RSI) across next l-window
+            for k in range(j + 1, min(j + l,n)):
+                if data[j] > r1:
+                    rsi[j] += (data[k] - test_r2)/(avg_var*l)
+                elif data[j] < r1:
+                    rsi[j] += (test_r2 - data[k])/(avg_var*l)
+
+                # Step 6: Test for a regime shift at year j
+                if rsi[j] < 0:
+                    rsi[j] = 0
+                    break
+
+            # Step 7: Confirm significant regime shift at year j
+            if rsi[j] > 0:
+                regime_shift_indices.append(j)
+                r2 = np.mean(data[j:min(j+l,n)])
+                r1 = r2
+                r1_lower = r1 - diff
+                r1_upper = r1 + diff
+
+            i = j + 1
+        else:
+            # Recalculate average for R1 to include the new value
+            r1 = ((l - 1) * r1 + data[i]) / l
+
+        i += 1
+    return regime_shift_indices, rsi
+
