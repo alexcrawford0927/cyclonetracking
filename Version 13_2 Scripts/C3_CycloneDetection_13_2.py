@@ -55,8 +55,8 @@ print("Setting up environment")
 path = "/Volumes/Cressida"
 dataset = "ERA5"
 verd = "13_2" # Detection Version
-vert = 'P' # Tracking Version
-spres = 25 # Spatial resolution (in km)
+vert = 'Ptest' # Tracking Version
+spres = 100 # Spatial resolution (in km)
 
 inpath = path+"/"+dataset+"/SLP_EASE2_N0_"+str(spres)+"km"
 outpath = path+"/CycloneTracking"
@@ -71,13 +71,13 @@ invar = "SLP"
 ncvar = "msl" # 'msl' for ERA5, 'SLP' for MERRA2 & CFSR
 
 # Time Variables
-starttime = [1982,4,1,0,0,0] # Format: [Y,M,D,H,M,S]
-endtime = [2000,1,1,0,0,0] # stop BEFORE this time (exclusive)
+starttime = [1979,1,1,0,0,0] # Format: [Y,M,D,H,M,S]
+endtime = [1979,2,1,0,0,0] # stop BEFORE this time (exclusive)
 timestep = [0,0,0,6,0,0] # Time step in [Y,M,D,H,M,S]
 
 dateref = [1900,1,1,0,0,0]  # [Y,M,D,H,M,S]
 
-prior = 1 # 1 = a cyclone track object exists for a prior month; 0 = otherwise
+prior = 0 # 1 = a cyclone track object exists for a prior month; 0 = otherwise
 
 # Detection Parameters #
 minfield = 80000 # minimum reasonable value in field array
