@@ -10,6 +10,8 @@ Date Modified: 18 Apr 2016; 10 Jul 2019 (update for Python 3);
                             instead of overwriting for all years. Climatologies no longer in this script.
                 01 Nov 2021: Added the possibility of appending prior years as will as subsequent years.
                 23 Jan 2023: Adapted to version 13
+                06 Feb 2025: Changed to eliminate all NaNs -- if no cyclone tracks are found, the trakc density is now 0
+                    --> Is is likely a reversion to previous behavior because the NaNs were being introduced at the monthly aggregation step, not the initial assignment
 Purpose: Calculate aggergate track density (Eulerian-Lagrangian hybrid) for either
 cyclone tracks or system tracks.
 
@@ -40,19 +42,19 @@ from scipy import interpolate
 import numpy as np
 import netCDF4 as nc
 # import pickle5
-import CycloneModule_13_2 as md
+import CycloneModule_13_3 as md
 
 '''*******************************************
 Set up Environment
 *******************************************'''
 print("Setting up environment.")
-bboxnum = "BBox27" # use "" if performing on all cyclones; or BBox##
+subset = "" # use "" if performing on all cyclones; or BBox##
 typ = "System"
-ver = "13_2R"
+ver = "13testP"
 
-path = "/Volumes/Cressida"
+path = "/Volumes/Cressida" # "/media/alex/Datapool" # 
 inpath = path+"/CycloneTracking/tracking"+ver
-outpath = inpath+"/"+bboxnum
+outpath = inpath+"/"+subset
 suppath = path+"/Projections"
 
 '''*******************************************
@@ -60,14 +62,11 @@ Define Variables
 *******************************************'''
 print("Defining variables")
 # Time Variables
-starttime = [1950,1,1,0,0,0] # Format: [Y,M,D,H,M,S]
-endtime = [1951,1,1,0,0,0] # stop BEFORE this time (exclusive)
+starttime = [1979,1,1,0,0,0] # Format: [Y,M,D,H,M,S]
+endtime = [1979,2,1,0,0,0] # stop BEFORE this time (exclusive)
 monthstep = [0,1,0,0,0,0] # A Time step that increases by 1 month [Y,M,D,H,M,S]
 
 seasons = np.array([1,2,3,4,5,6,7,8,9,10,11,12]) # Ending month for three-month seasons (e.g., 2 = DJF)
-months = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"]
-mons = ["01","02","03","04","05","06","07","08","09","10","11","12"]
-dpm = [31,28,31,30,31,30,31,31,30,31,30,31]
 
 # Aggregation Parameters
 minls = 1 # minimum lifespan (in days) for a track to be considered
@@ -100,16 +99,22 @@ print("Step 1. Load Files and References")
 # Read in attributes of reference files
 params = pd.read_pickle(inpath+"/cycloneparams.pkl")
 # params = pickle5.load(open(inpath+"/cycloneparams.pkl",'rb'))
-timestep = params['timestep']
+
 try:
     spres = params['spres']
 except:
     spres = 100
+    
+if int(ver.split('_')[0]) < 14:
+    prjpath = path+"/Projections/EASE2_N0_"+str(spres)+"km_Projection_uv.nc"
+else:
+    prjpath = path+"/Projections/EASE2_N0_"+str(spres)+"km_Projection.nc"
 
-proj = nc.Dataset(suppath+"/EASE2_N0_"+str(spres)+"km_Projection.nc")
+proj = nc.Dataset(prjpath)
 lats = proj['lat'][:]
 
 kSize = int(kSizekm/spres) # This needs to be the full width ('diameter'), not the half width ('radius') for ndimage filters
+kernel = md.circleKernel(int(kSize),masked_value=0)
 
 print("Step 2. Aggregation requested for " + str(starttime[0]) + "-" + str(endtime[0]-1))
 name = ver+"_AggregationFields_Monthly_"+vName+".nc"
@@ -144,15 +149,15 @@ mt = newstarttime
 while mt != newendtime:
     # Extract date
     Y = str(mt[0])
-    MM = months[mt[1]-1]
-    M = mons[mt[1]-1]
+    MM = md.mmm[mt[1]-1]
+    M = md.dd[mt[1]-1]
     if MM == "Jan":
         print(" " + Y)
 
     ### LOAD TRACKS ###
     # Load Cyclone/System Tracks
     # cs = pickle5.load(open(inpath+"/"+bboxnum+"/"+typ+"Tracks/"+Y+"/"+bboxnum+typ.lower()+"tracks"+Y+M+".pkl",'rb'))
-    cs = pd.read_pickle(inpath+"/"+bboxnum+"/"+typ+"Tracks/"+Y+"/"+bboxnum+typ.lower()+"tracks"+Y+M+".pkl")
+    cs = pd.read_pickle(inpath+"/"+subset+"/"+typ+"Tracks/"+Y+"/"+subset+typ.lower()+"tracks"+Y+M+".pkl")
 
     ### LIMIT TRACKS & IDS ###
     # Limit to tracks that satisfy minimum lifespan and track length
@@ -184,6 +189,7 @@ while mt != newendtime:
             trk_field[y,x] += 1
 
     ### SMOOTH FIELDS ###
+    # varFieldsm = np.array( ndimage.generic_filter( trk_field, np.nanmean, footprint=kernel, mode='nearest' ) )
     varFieldsm = ndimage.uniform_filter(trk_field,kSize,mode="nearest") # --> This cannot handle NaNs
     vlists.append(varFieldsm) # append to list
 
@@ -227,9 +233,32 @@ if name in priorfiles: # Append data if prior data existed...
         prior = nc.Dataset(name)
 
         if starttime[0] < firstyear:
-            ncvar[:] = np.concatenate( ( np.where(vout == 0,np.nan,vout) , prior[vName][:].data ) )
+            ncvar[:] = np.concatenate( ( vout , prior[vName][:].data ) )
         else:
-            ncvar[:] = np.concatenate( ( prior[vName][:].data , np.where(vout == 0,np.nan,vout) ) )
+            ncvar[:] = np.concatenate( ( prior[vName][:].data ,vout ) )
+
+
+        if (vout.shape[0] > 0) & (prior[vName].shape != vout.shape): # ...and there is new data to be added
+            prior = nc.Dataset(name)
+
+            if (startyear <= firstyear) and (endyear >= nextyear): # If the new data starts before and ends after prior data
+                ncvar[:] = vout
+
+            elif (startyear > firstyear) and (endyear < nextyear): # If the new data starts after and ends before prior data
+                ncvar[:] = np.concatenate( ( prior[vName][prior['time'][:].data < newstarttime[0],:,:].data , vout , prior[vName][prior['time'][:].data >= newendtime[0],:,:].data ) )
+
+            elif (endyear <= firstyear): # If the new data starts and ends before the prior data
+                ncvar[:] = np.concatenate( ( vout , prior[vName][prior['time'][:].data >= newendtime[0],:,:].data ) )
+
+            elif (endyear >= nextyear): # If the new data starts and ends after the prior data
+                ncvar[:] = np.concatenate( ( prior[vName][prior['time'][:].data < newstarttime[0],:,:].data , vout ) )
+
+            else:
+                mnc.close()
+                raise Exception('''Times are misaligned.\n
+                                Requested Year Range: ''' + str(starttime[0]) + "-" + str(endtime[0]-1) + '''.
+                                Processed Year Range: ''' + str(newstarttime[0]) + "-" + str(newendtime[0]-1) + '''.
+                                New Data Year Range: ''' + str(startyear) + '-' + str(endyear-1)+'.')
 
         mnc.close()
 
@@ -237,7 +266,7 @@ if name in priorfiles: # Append data if prior data existed...
         os.rename(ver+"_AggregationFields_Monthly_"+vName+"_NEW.nc", name) # rename new file to standard name
 
 else: # Create new data if no prior data existed
-    ncvar[:] = np.where(vout == 0,np.nan,vout)
+    ncvar[:] = vout
     mnc.close()
     os.rename(ver+"_AggregationFields_Monthly_"+vName+"_NEW.nc", name) # rename new file to standard name
 

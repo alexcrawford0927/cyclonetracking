@@ -19,36 +19,39 @@ Load Modules
 **********'''
 import xarray as xr
 import xesmf as xe
-import CycloneModule_13_2 as md
+import CycloneModule_13_3 as md
 import pandas as pd
 import numpy as np
 import warnings
-warnings.simplefilter(action='ignore', category=FutureWarning)
+# warnings.simplefilter(action='ignore', category=FutureWarning)
+warnings.simplefilter(action='ignore', category=UserWarning)
 
 '''**********
 Define Variables
 **********'''
-starttime = [2000,1,1,0,0,0] # inclusive
-endtime = [2022,1,1,0,0,0] # exclusive
+starttime = [2023,2,1,0,0,0] # inclusive
+endtime = [2025,1,1,0,0,0] # exclusive
 filetimestep = [0,1,0,0,0,0] # time step between cyclone files
 inittime = [1940,1,1,0,0,0] # Initiation time for cyclone tracking dataset
-dateref = [1900,1,1,0,0,0] # Reference date for input data
 
 dataset = 'ERA5'
 cycver = '13_2E5R'
 subset = 'BBox10'
 typ = 'System'
 
-V = 'V6'
-rad = 1200 # radius for constant kernel size (units: km)
+V = 'V7'
+rad = 800 # radius for constant kernel size (units: km)
 minlat = 20 # Cyclone must reach this latitude at least once
 minlat2 = 15 # Trim any location that is south of this latitude
 
-apath = '/Volumes/Telemachus/'+dataset #
-apath2 ='/Volumes/Prospero/'+dataset #
-cpath = '/Volumes/Cressida/CycloneTracking/tracking'+cycver+'/'+subset+'/'+typ+'Tracks'
-ppath = '/Volumes/Cressida/Projections'
-outpath = "/Volumes/Cressida/CycloneTracking/tracking"+cycver+"/"+subset+"/Aggregation"+typ+"/MoistureBudget_"+str(rad)
+path = '/media/alex/Datapool'
+apath = path+'/'+dataset #'/Volumes/Telemachus/'+dataset #
+apath2 =path+'/'+dataset #'/Volumes/Prospero/'+dataset #
+ppath = path+'/Projections' # '/Volumes/Cressida/Projections'
+cpath = path+'/CycloneTracking/tracking'+cycver
+# cpath = '/Volumes/Cressida/CycloneTracking/tracking'+cycver+'/'+subset+'/'+typ+'Tracks'
+outpath = path+"/CycloneTracking/tracking"+cycver+"/"+subset+"/Aggregation"+typ+"/SpatialAvgEnv_"+str(rad)+'km'
+# outpath = "/Volumes/Cressida/CycloneTracking/tracking"+cycver+"/"+subset+"/Aggregation"+typ+"/MoistureBudget_"+str(rad)
 
 # Use the _uv suffix if cycver < 14
 if int(cycver.split('_')[0]) < 14:
@@ -64,12 +67,19 @@ inprjname = 'ERA5_NH_Projection.nc'
 landseamaskname = apath2+'/Invariant/'+dataset+'_LandSeaMask.nc'
 
 # Variable Names
-filevars = ['TCW','TCWV','CloudWater','Precipitation','Evaporation','MoistDiv','SIC']
-filetres = ['3h','3h','3h','Hourly','Hourly','Hourly','3h']
-ncvars = [['tcw'],['tcwv'],['tclw','tciw'],['tp'],['e'],['vimd'],['siconc']]
-diffvari = [0,1,2]
+# filevars = ['TCW','TCWV','CloudWater','Precipitation','Evaporation','MoistureFluxDiv','SIC']
+# filetres = ['3h','3h','3h','Hourly','Hourly','Hourly','3h']
+# ncvars = [['tcw'],['tcwv'],['tclw','tciw'],['tp'],['e'],['vivwd'],['siconc']]
+# diffvari = [0,1,2]
+# multiplier = [[1],[1],[1,1],[1000],[1000],[3600],[100]] # to make the units mm (i.e., kg/m^2) of water -- and summed over an hour for fluxes
 
-multiplier = [[1],[1],[1,1],[1000],[1000],[1],[100]] # to make the units mm (i.e., kg/m^2) of water -- and summed over an hour for fluxes
+filevars = ['TCW','Precipitation','Evaporation','MoistureFluxDiv','SIC']
+filetres = ['3h','Hourly','Hourly','Hourly','3h']
+ncvars = [['tcw'],['tp'],['e'],['viwvd'],['siconc']]
+diffvari = [0]
+multiplier = [[1],[1000],[1000],[3600],[100]] # to make the units mm (i.e., kg/m^2) of water -- and summed over an hour for fluxes
+
+cvars = ['x','y','lat','lon','p_cent','depth','radius','p_grad','DsqP','uv','DpDt']
 
 '''**********
 Main Analysis
@@ -79,20 +89,21 @@ print("Setting up regridders")
 outprj = xr.open_dataset(ppath+"/"+outprjname)
 inprj = xr.open_dataset(ppath+"/"+inprjname)
 try:
-    regridder = xe.Regridder(inprj, outprj, 'bilinear', weights=xr.open_dataset(ppath+"/"+regridname))
+    regridder = xe.Regridder(inprj, outprj, 'bilinear', weights=xr.open_dataset(ppath+"/Regridders/"+regridname))
 
 except:
     regridder = xe.Regridder(inprj, outprj, 'bilinear')
     regridder.to_netcdf(ppath+"/"+regridname)
 
 try:
-    regridder_nn = xe.Regridder(inprj, outprj, 'nearest_s2d', weights=xr.open_dataset(ppath+"/"+regridnnname))
+    regridder_nn = xe.Regridder(inprj, outprj, 'nearest_s2d', weights=xr.open_dataset(ppath+"/Regridders/"+regridnnname))
 except:
     regridder_nn = xe.Regridder(inprj, outprj, 'nearest_s2d')
     regridder_nn.to_netcdf(ppath+'/'+regridnnname)
 
 # Define kernel
-spres = pd.read_pickle('/Volumes/Cressida/CycloneTracking/tracking'+cycver+"/cycloneparams.pkl")['spres']
+spres = pd.read_pickle(cpath+"/cycloneparams.pkl")['spres']
+dateref = pd.read_pickle(cpath+"/cycloneparams.pkl")['dateref']
 kernel = md.circleKernel(int(rad/spres))
 nanmask = outprj['z'].data*np.nan
 
@@ -129,7 +140,7 @@ while mt != endtime:
     del ds
 
     # Load cyclone for current month
-    cts  = pd.read_pickle(cpath+"/"+Y+"/"+subset+typ.lower()+"tracks"+Y+M+".pkl")
+    cts  = pd.read_pickle(cpath+'/'+subset+'/'+typ+'Tracks'+"/"+Y+"/"+subset+typ.lower()+"tracks"+Y+M+".pkl")
     cts = [ct for ct in cts if ct.data.lat.max() >= minlat]
 
     print('Processing ' +str(mt))
@@ -243,8 +254,12 @@ while mt != endtime:
         data2['year'] = np.repeat(mt[0],len(avglists[0]))
         data2['month'] = mt[1]
         data2['sid'] = ct.sid
+        data2['time'] = ct.data.time.values
         data2['age'] =  (np.array(ct.data.time)[:] - np.array(ct.data.time)[0]) / ct.lifespan()
         data2['landfraction'] = avglists[0]
+        
+        for cvar in cvars:
+            data2[cvar] = ct.data[cvar].values
 
         j = 1
         for v in range(len(filevars)):
@@ -260,7 +275,7 @@ while mt != endtime:
         pdf = pd.concat([pdf,data2],ignore_index=True,sort=False)
 
     # Write to File
-    pdf.to_csv(outpath+"/MoistureBudget_"+str(rad)+"km_"+str(mt[0])+md.dd[mt[1]-1]+"_"+V+".csv",index=False)
+    pdf.to_csv(outpath+"/SpatialAvgEnv"+str(rad)+"km_"+str(mt[0])+md.dd[mt[1]-1]+".csv",index=False)
 
     # Advance time step & and shift current month data to prior month status
     mt0 = mt+[]
@@ -272,7 +287,7 @@ while mt != endtime:
 # from scipy.stats import spearmanr as spearman
 
 # rad = 1200
-# V = '_V5' # '' #
+# V = '_V6' # '' #
 # pdf = pd.read_csv("/Volumes/Cressida/CycloneTracking/tracking"+cycver+"/"+subset+"/Aggregation"+typ+"/MoistureBudget"+str(rad)+"/MoistureBudget_"+str(rad)+"km_"+str(starttime[0])+md.dd[starttime[1]-1]+V+".csv")
 # # pdf = pd.read_csv("/Volumes/Cressida/CycloneTracking/tracking"+cycver+"/"+subset+"/Aggregation"+typ+"/MoistureBudgetAmly"+str(rad)+"/MoistureBudgetAmly_"+str(rad)+"km_"+str(starttime[0])+md.dd[starttime[1]-1]+V+".csv")
 # pdf['tcw_tendency'] = np.concatenate( (np.array([np.nan]),np.array(pdf['tcw'])[1:] - np.array(pdf['tcw'])[:-1]) )

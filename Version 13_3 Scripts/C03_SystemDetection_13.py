@@ -24,7 +24,7 @@ start = perf_counter()
 
 print("Loading modules.")
 import pandas as pd
-import CycloneModule_13_2 as md
+import CycloneModule_13_3 as md
 
 '''*******************************************
 Set up Environment
@@ -32,8 +32,8 @@ Set up Environment
 print("Setting up environment.")
 subset = "" # use "" if performing on all cyclones
 
-inpath = "/Volumes/Cressida/CycloneTracking/tracking13_2R/"+subset
-outpath = inpath
+inpath = "/Volumes/Cressida/CycloneTracking/tracking13testP/"
+outpath = inpath+"/"+subset
 
 '''*******************************************
 Define Variables
@@ -45,14 +45,14 @@ rg = 1
 # 1 = regenesis continues previous system track with new ptid
 
 # Time Variables
-starttime = [1950,1,1,0,0,0] # Format: [Y,M,D,H,M,S]
-endtime = [1951,1,1,0,0,0] # stop BEFORE this time (exclusive)
+lyb, dpy = 1, 365 # Whether there are leap years; how many days in a a non-leap year
+
+starttime = [1979,1,1,0,0,0] # Format: [Y,M,D,H,M,S]
+endtime = [1979,2,1,0,0,0] # stop BEFORE this time (exclusive)
 reftime = [1950,1,1,0,0,0]
 monthstep = [0,1,0,0,0,0] # A Time step that increases by 1 month [Y,M,D,H,M,S]
 
 dateref = [1900,1,1,0,0,0] # [Y,M,D,H,M,S]
-
-mons = ["01","02","03","04","05","06","07","08","09","10","11","12"]
 
 '''*******************************************
 Main Analysis
@@ -63,30 +63,30 @@ mt = starttime
 while mt != endtime:
     # Extract date
     Y = str(mt[0])
-    M = mons[mt[1]-1]
+    M = md.dd[mt[1]-1]
     print (" " + Y + " - " + M)
 
     # Load Cyclone Tracks
-    ct = pd.read_pickle(inpath+"/CycloneTracks/"+Y+"/"+subset+"cyclonetracks"+Y+M+".pkl")
+    ct = pd.read_pickle(inpath+"/"+subset+"/CycloneTracks/"+Y+"/"+subset+"cyclonetracks"+Y+M+".pkl")
 
     # Create System Tracks
     if mt == reftime:
-        cs, cs0 = md.cTrack2sTrack(ct,[],dateref,rg)
-        pd.to_pickle(cs,inpath+"/SystemTracks/"+Y+"/"+subset+"systemtracks"+Y+M+".pkl")
+        cs, cs0 = md.cTrack2sTrack(ct, [], dateref, rg, lyb, dpy)
+        pd.to_pickle(cs,outpath+"/SystemTracks/"+Y+"/"+subset+"systemtracks"+Y+M+".pkl")
 
     else:
         # Extract date for previous month
         mt0 = md.timeAdd(mt,[-d for d in monthstep])
         Y0 = str(mt0[0])
-        M0 = mons[mt0[1]-1]
+        M0 = md.dd[mt0[1]-1]
 
         # Load previous month's system tracks
-        cs0 = pd.read_pickle(inpath+"/SystemTracks/"+Y0+"/"+subset+"systemtracks"+Y0+M0+".pkl")
+        cs0 = pd.read_pickle(outpath+"/SystemTracks/"+Y0+"/"+subset+"systemtracks"+Y0+M0+".pkl")
 
         # Create system tracks
-        cs, cs0 = md.cTrack2sTrack(ct,cs0,dateref,rg)
-        pd.to_pickle(cs,inpath+"/SystemTracks/"+Y+"/"+subset+"systemtracks"+Y+M+".pkl")
-        pd.to_pickle(cs0,inpath+"/SystemTracks/"+Y0+"/"+subset+"systemtracks"+Y0+M0+".pkl")
+        cs, cs0 = md.cTrack2sTrack(ct, cs0, dateref, rg, lyb, dpy)
+        pd.to_pickle(cs,outpath+"/SystemTracks/"+Y+"/"+subset+"systemtracks"+Y+M+".pkl")
+        pd.to_pickle(cs0,outpath+"/SystemTracks/"+Y0+"/"+subset+"systemtracks"+Y0+M0+".pkl")
 
     # Increment Time Step
     mt = md.timeAdd(mt,monthstep)

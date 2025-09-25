@@ -3,18 +3,18 @@ Author: Alex Crawford
 Date Created: 28 Jul 2015
 Date Modified: 12 Jun 2019 --> Modified for Python 3
                 18 May 2020 --> Modified for using netcdf files instead of geotiffs
-                19 Jan 2021 --> Added pickles as acceptable file input for masks
-                11 Jun 2021 --> Added option for minimum displacement
-                17 Apr 2023 --> modified for version 13
+                23 Jan 2023 --> Adapted to version 13
 Purpose: Identify tracks that spend any point of their lifetime within a
-bounding box defined by a list of (lon,lat) ordered pairs in a csv file.
+bounding box defined by a list of (long,lat) ordered pairs in a csv file.
 
 Inputs: User must define the...
     Type of Tracks (typ) -- Cyclone Centers ("Cyclone") or System Centers ("System")
     Bounding Box Number (bboxnum) -- An ID for organizing directories
     Bounding Box Mask (bboxName) -- pathway for the mask to be used
-    Versions of Module and Algorithm Run (e.g. 11.1, 12.4)
+    Versions of Module and Algorithm Run (e.g. 7.8, 9.5)
+    Spatial Resolution
     Dates of interest
+    Minimum track length and lifespan
 '''
 
 '''********************
@@ -30,8 +30,6 @@ import numpy as np
 import CycloneModule_13_2 as md
 import os
 import netCDF4 as nc
-from scipy import interpolate
-# import pickle5
 
 def maxDistFromGenPnt(data):
     return  np.max([md.haversine(data.lat[0],data.lat[i],data.lon[0],data.lon[i]) for i in range(len(data.lon))]) / 1000
@@ -40,41 +38,30 @@ def maxDistFromGenPnt(data):
 Set up Environment
 *******************************************'''
 path = "/Volumes/Cressida"
-inpath = path+"/CycloneTracking/tracking13_2R"
+inpath = path+"/CycloneTracking/tracking13testP"
 outpath = inpath
 
 '''*******************************************
 Define Variables
 *******************************************'''
-# spres = pickle5.load(open(inpath+"/cycloneparams.pkl",'rb'))['spres']
-spres =  pd.read_pickle(inpath+"/cycloneparams.pkl")['spres'] # 100 #
-
 # File Variables
 typ = "System" # Cyclone, System, or Active
 
-bboxName =  path+"/Projections/EASE2_N0_"+str(spres)+"km_Projection.nc"  # path+"/Projections/EASE2_N0_25km_GenesisRegions.pkl" # "/Volumes/Cressida/Projections/EASE2_N0_100km_SeaIceRegions.pkl" #
-ncvar = 'z' # 'reg' # 'z' # Set to None unless file is a netcdf
-bboxmin = -1*np.inf #None #    Set to None if using values instead #
-bboxmax = 500 #None #   Set to None if using values instead #
-values = [1] #[26] # [10,11,12,13,15] #  If using a min and max, set to 1, otherwise, these are the
-## acccepted values within the mask raster (e.g., the regions of interest)
-
-bboxnum = "10"
+bboxName = path+"/Projections/EASE2_N0_25km_Projection_uv.nc"
+bbox = [65,85,120,-90] # minlat, maxlat, minlon, maxlon
+bboxnum = "40"
 bboxmain = "" # The main bbox your subsetting from; usually "" for "all cyclones", otherwise BBox##
 
 # Time Variables
-starttime = [2021,1,1,0,0,0] # Format: [Y,M,D,H,M,S]
-endtime = [2022,1,1,0,0,0] # stop BEFORE this time (exclusive)
+starttime = [1979,1,1,0,0,0] # Format: [Y,M,D,H,M,S]
+endtime = [1979,2,1,0,0,0] # stop BEFORE this time (exclusive)
 monthstep = [0,1,0,0,0,0] # A Time step that increases by 1 mont [Y,M,D,H,M,S]
 
 dateref = [1900,1,1,0,0,0] # [Y,M,D,H,M,S]
 
-months = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"]
-mons = ["01","02","03","04","05","06","07","08","09","10","11","12"]
-
 minlifespan = 1 # in days
-mintracklength = 1000 # in km for version 11 or later, in gridcells for version 10 or earlier
-mindisplacement = 500 # in km
+mintracklength = 1000 # in km
+mindisplacement = 500 # in km (at least one observation of this cyclone must be at least this far away from its genesis point)
 
 '''*******************************************
 Main Analysis
@@ -82,18 +69,14 @@ Main Analysis
 print("Main Analysis")
 
 # Load Mask
-if bboxName.endswith(".nc"):
-    bboxnc = nc.Dataset(bboxName)
-    bbox = bboxnc[ncvar][:].data
-elif bboxName.endswith(".pkl"):
-    bbox = pd.read_pickle(bboxName)
+bboxnc = nc.Dataset(bboxName)
+lats = bboxnc['lat'][:].data
+lons = bboxnc['lon'][:].data
 
-if bboxmin == None:
-    mask0 = bbox
+if bbox[-2] > bbox[-1]:
+    mask = ((lats >= bbox[0]) & (lats <= bbox[1]) & ( (lons >= bbox[2]) | (lons <= bbox[3])) )
 else:
-    mask0 = np.where((bbox >= bboxmin) & (bbox <= bboxmax), 1, 0)
-
-mask = np.isin(mask0,values).reshape(mask0.shape)
+    mask = ((lats >= bbox[0]) & (lats <= bbox[1]) & (lons >= bbox[2]) & (lons <= bbox[3]))
 
 # Set up output paths
 try:
@@ -113,31 +96,30 @@ mt = starttime
 while mt != endtime:
     # Extract date
     Y = str(mt[0])
-    MM = months[mt[1]-1]
-    M = mons[mt[1]-1]
+    MM = md.mmm[mt[1]-1]
+    M = md.dd[mt[1]-1]
     print(" " + Y + " - " + MM)
 
     # Load Tracks
     cs = pd.read_pickle(inpath+"/"+bboxmain+"/"+typ+"Tracks/"+Y+"/"+bboxmain+typ.lower()+"tracks"+Y+M+".pkl")
-    # cs = pickle5.load(open(inpath+"/"+bboxmain+"/"+typ+"Tracks/"+Y+"/"+bboxmain+typ.lower()+"tracks"+Y+M+".pkl",'rb'))
     cs = [tr for tr in cs if ((tr.lifespan() >= minlifespan) and (tr.trackLength() >= mintracklength)) and (maxDistFromGenPnt(tr.data) >= mindisplacement)]
 
     trs = []
     for tr in cs: # For each track
-        # Extract time and location
-        xs = np.array(tr.data.x)
-        ys = np.array(tr.data.y)
-        hours = np.array(tr.data.time*24)
+        # Collect lats and longs
+        xs = list(tr.data.x)
+        ys = list(tr.data.y)
 
-        # Interpolate to hourly
-        f = interpolate.interp1d(hours,xs)
-        xs2 = f(np.arange(hours[0],hours[-1])).astype(int)
-        f = interpolate.interp1d(hours,ys)
-        ys2 = f(np.arange(hours[0],hours[-1])).astype(int)
-
-        # Test if at least one point is within the mask
-        if mask[ys2,xs2].sum() > 0:
-            trs.append(tr)
+        # Prep while loop
+        test = 0
+        i = 0
+        while test == 0 and i < len(xs):
+            # If at any point the cyclone enters the bbox, keep it
+            if mask[int(ys[i]),int(xs[i])] == 1:
+                trs.append(tr)
+                test = 1
+            else:
+                i = i+1
 
     # Save Tracks
     try:

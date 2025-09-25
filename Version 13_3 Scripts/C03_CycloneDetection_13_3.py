@@ -13,6 +13,9 @@ Date Modified: 10 Sep 2020 -> Branch from 12_1 --> kernel size is now based on k
                 03 Apr 2023 --> Improved flexibility running the code using prior cyclone detection for a new temporal
                             resolution while tracking -- there were some bugs if the original run was at a finer temporal resolution
                             and a later run was at a coarser resolution
+                07 Jan 2025 --> If prior == 1 and a cycloneparams.pkl file is found, that file is used to 
+                            define the input parameters -- overriding any user input. This should reduce
+                            mismatches when trying to update a pre-exisitng set of cyclone tracks.
 
 Purpose: Given a series of sea level pressure fields in netcdf files, this
     script performs several steps:
@@ -36,13 +39,13 @@ import time
 # Start script stopwatch. The clock starts running when time is imported
 start = time.perf_counter()
 
-print("Loading modules")
+print("Loading Modules")
 import os
 import copy
 import pandas as pd
 import numpy as np
 import netCDF4 as nc
-import CycloneModule_13_2 as md
+import CycloneModule_13_3 as md
 import warnings
 
 np.seterr(all='ignore') # This mutes warnings from numpy
@@ -51,33 +54,39 @@ warnings.filterwarnings('ignore',category=DeprecationWarning)
 '''*******************************************
 Set up Environment
 *******************************************'''
-print("Setting up environment")
-path = "/Volumes/Cressida"
-dataset = "ERA5"
-verd = "13_2" # Detection Version
-vert = 'Ptest' # Tracking Version
+print("Setting up Environment")
+path =  "/Volumes/Cressida" # "/media/alex/Datapool" # 
+dataset = "ERA5" #"MERRA2" # 
+verd = "13test" #  Detection Version
+vert = 'P' # Tracking Version
 spres = 100 # Spatial resolution (in km)
 
+# inpath = "/Volumes/Cressida/"+dataset+"/SLP_EASE2_N0_"+str(spres)+"km"
 inpath = path+"/"+dataset+"/SLP_EASE2_N0_"+str(spres)+"km"
 outpath = path+"/CycloneTracking"
-suppath = path+"/Projections/EASE2_N0_"+str(spres)+"km_Projection.nc"
+suppath = path+"/Projections/EASE2_N0_"+str(spres)+"km_Projection_uv.nc"
 
 '''********************
-Define Variables/Parameters
+Define Input Parameters
 ********************'''
-print("Defining parameters")
+print("Defining Input Parameters")
+
 # File Variables
 invar = "SLP"
 ncvar = "msl" # 'msl' for ERA5, 'SLP' for MERRA2 & CFSR
 
+prior = 0 # 1 = a cyclone track object exists for a prior month; 0 = otherwise
+
 # Time Variables
 starttime = [1979,1,1,0,0,0] # Format: [Y,M,D,H,M,S]
 endtime = [1979,2,1,0,0,0] # stop BEFORE this time (exclusive)
+
+### If prior == 1, then remaining parameters will be preferentially taken from
+# the cycloneparams.pkl file from the last time this script was run and anything 
+# you edit below here will only be used if that parameters file cannot be found. ###
+
 timestep = [0,0,0,6,0,0] # Time step in [Y,M,D,H,M,S]
-
 dateref = [1900,1,1,0,0,0]  # [Y,M,D,H,M,S]
-
-prior = 0 # 1 = a cyclone track object exists for a prior month; 0 = otherwise
 
 # Detection Parameters #
 minfield = 80000 # minimum reasonable value in field array
@@ -122,7 +131,7 @@ mccdist = 1200000
 ### in units of km/h. To be realistic, the number should be between 100 and 200.
 ### and probably over 125 (based on Rudeva et al. 2014). To turn off, set to
 ### np.inf. Also, note that instabilities occur at temporal resolution of 1-hr.
-### Tracking at 6-hr and a maxspeed of 125 km/hr is more comprable to tracking
+### Tracking at 6-hr and a maxspeed of 125 km/hr is more comparable to tracking
 ### at 1-hr and a maxspeed of 300 km/hr (assuming spatial resolution of 50 km).
 maxspeed = 150 # constant value
 # maxspeed = 150*(3*math.log(timestep[3],6)+2)/timestep[3] # One example of scaling by temporal resolution
@@ -135,7 +144,7 @@ maxspeed = 150 # constant value
 red = 0.75
 
 '''*******************************************
-Main Analysis
+Preparations for Analysis
 *******************************************'''
 print("Loading Folders & Reference Files")
 
@@ -187,26 +196,37 @@ yDist = projnc['yDistance'][:].data
 xDist = projnc['xDistance'][:].data
 elev = projnc['z'][:]
 
+
+# Load / Save Input Parameters
+if prior == 1 and "cycloneparams.pkl" in md.listdir(trkpath):
+    params = pd.read_pickle(trkpath+"/cycloneparams.pkl")
+    timestep, dateref, spres = params['timestep'], params['dateref'], params['spres']
+    maxfield, minfield, nanThresh = params['maxfield'], params['minfield'], params['nanThresh']
+    kSize, kSizekm, maxelev = params['kSize'], params['kSizekm'], params['maxelev']
+    d_slp, d_dist, minlat = params['d_slp'], params['d_dist'], params['minlat']
+    contint, mcctol, mccdist = params['contint'], params['mcctol'], params['mccdist']
+    maxspeed, red = params['maxspeed'], params['red']    
+else:
+    kSize = int(2*kSizekm/spres)+1     # Convert kernel size to grid cells
+
+    params = dict({"path":trkpath,"timestep":timestep, "dateref":dateref, "minfield":minfield,
+        "maxfield":maxfield,"kSize":kSize, "kSizekm":kSizekm,"nanThresh":nanThresh, "d_slp":d_slp, \
+        "d_dist":d_dist, "maxelev":maxelev, "minlat":minlat, "contint":contint,
+        "mcctol":mcctol, "mccdist":mccdist, "maxspeed":maxspeed, "red":red, "spres":spres})
+    pd.to_pickle(params,trkpath+"/cycloneparams.pkl")
+
+# Convert max speed to max distance
+maxdist = maxspeed*1000*timestep[3]
+
 # Generate mask based on latitude and elevation
 if minlat >= 0:
     mask = np.where((elev > maxelev) | (lats < minlat),np.nan,0)
 else:
     mask = np.where((elev > maxelev) | (lats > minlat),np.nan,0)
 
-# Convert kernel size to grid cells
-kSize = int(2*kSizekm/spres)+1
-
-# Convert max speed to max distance
-maxdist = maxspeed*1000*timestep[3]
-
-# Save Parameters
-params = dict({"path":trkpath,"timestep":timestep, "dateref":dateref, "minfield":minfield,
-    "maxfield":maxfield,"kSize":kSize, "kSizekm":kSizekm,"nanThresh":nanThresh, "d_slp":d_slp, \
-    "d_dist":d_dist, "maxelev":maxelev, "minlat":minlat, "contint":contint,
-    "mcctol":mcctol, "mccdist":mccdist, "maxspeed":maxspeed, "red":red, "spres":spres})
-pd.to_pickle(params,trkpath+"/cycloneparams.pkl")
-
-##### The actual detection and tracking #####
+'''*******************************************
+Main Analysis
+*******************************************'''
 print("Cyclone Detection & Tracking")
 # Print elapsed time
 print(' Elapsed time:',round(time.perf_counter()-start,2),'seconds -- Starting first month')

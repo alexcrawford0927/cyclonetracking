@@ -20,22 +20,21 @@ import pandas as pd
 import os
 import numpy as np
 import netCDF4 as nc
-import CycloneModule_13_2 as md
+import CycloneModule_13_3 as md
 
 '''*******************************************
 Set up Environment
 *******************************************'''
-BBoxNum = "BBox27" # Use "BBox##" or "" if no subset
-path = "/Volumes/Cressida"
-version = "13_2R"
-inpath = path+"/CycloneTracking/tracking"+version+"/"+BBoxNum
+subset = "" # Use "BBox##" or "" if no subset
+path = '/media/alex/Datapool/' # "/Volumes/Cressida"
+version = "13testP"
+inpath = path+"/CycloneTracking/tracking"+version+"/"+subset
 regpath = path+"/Projections/EASE2_N0_25km_GenesisRegions.nc"
 
 '''*******************************************
 Define Variables
 *******************************************'''
 # File Variables
-ext = ".tif"
 kind1 = "System" # System, Cyclone
 kind = kind1+"Tracks" # Can be AFZ, Arctic, or other region (or no region), followed by System or Cyclone
 
@@ -46,18 +45,15 @@ V = "_GenReg" # An optional version name; suggested to start with "_" or "-" to 
 # Aggregation Parameters
 minls = 1 # minimum lifespan (in  days) for a track to be considered
 mintl = 1000 # minimum track length (in km)
-mindisp = 0
-minlat = 0 # minimum latitude
+mindisp = 0 # minimum displacement
+# bbox = [0,-180,90,180] # [latmin,lonmin,latmax,lonmax]
 
 # Time Variables
-starttime = [1950,1,1,0,0,0] # Format: [Y,M,D,H,M,S]
-endtime = [1980,1,1,0,0,0] # stop BEFORE this time (exclusive)
+starttime = [1979,1,1,0,0,0] # Format: [Y,M,D,H,M,S]
+endtime = [1979,2,1,0,0,0] # stop BEFORE this time (exclusive)
 monthstep = [0,1,0,0,0,0] # A Time step that increases by 1 mont [Y,M,D,H,M,S]
 
 dateref = [1900,1,1,0,0,0] # [Y,M,D,H,M,S]
-
-months = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"]
-mons = ["01","02","03","04","05","06","07","08","09","10","11","12"]
 
 '''*******************************************
 Main Analysis
@@ -69,14 +65,14 @@ spres = pd.read_pickle(path+"/CycloneTracking/tracking"+version+"/cycloneparams.
 
 # Create Empty lists
 sid, tid, year, month, avguv, maxdsqp, minp, maxdepth, maxpgrad, avgdsqp, avgp, avgdepth, avgpgrad = [[] for i in range(13)]
-lifespan, trlen, avgarea, mcc, spl1, spl2, spl3, mrg1, mrg2, mrg3, rge2, genReg, lysReg = [[] for i in range(13)]
+lifespan, trlen, avgarea, maxarea, mcc, spl1, spl2, spl3, mrg1, mrg2, mrg3, rge2, genReg, lysReg = [[] for i in range(14)]
 
 mt = starttime
 while mt != endtime:
     # Extract date
     Y = str(mt[0])
-    MM = months[mt[1]-1]
-    M = mons[mt[1]-1]
+    MM = md.mmm[mt[1]-1]
+    M = md.dd[mt[1]-1]
     print ("  " + Y + " - " + MM )
 
     mtdays = md.daysBetweenDates(dateref,mt) # Convert date to days since [1900,1,1,0,0,0]
@@ -84,25 +80,25 @@ while mt != endtime:
     mt2 = md.timeAdd(mt,monthstep) # Identify time for next month
 
     # Load tracks
-    cs = pd.read_pickle(inpath+"/"+kind+"/"+Y+"/"+BBoxNum+kind.lower()+Y+M+".pkl") # Current Month
+    cs = pd.read_pickle(inpath+"/"+kind+"/"+Y+"/"+subset+kind.lower()+Y+M+".pkl") # Current Month
     try: # Previous Month
-        cs0 = pd.read_pickle(inpath+"/"+kind+"/"+str(mt0[0])+"/"+BBoxNum+kind.lower()+str(mt0[0])+mons[mt0[1]-1]+".pkl")
+        cs0 = pd.read_pickle(inpath+"/"+kind+"/"+str(mt0[0])+"/"+subset+kind.lower()+str(mt0[0])+md.dd[mt0[1]-1]+".pkl")
     except:
         cs0 = []
     try: # Next Month
-        cs2 = pd.read_pickle(inpath+"/"+kind+"/"+str(mt2[0])+"/"+BBoxNum+kind.lower()+str(mt2[0])+mons[mt2[1]-1]+".pkl")
+        cs2 = pd.read_pickle(inpath+"/"+kind+"/"+str(mt2[0])+"/"+subset+kind.lower()+str(mt2[0])+md.dd[mt2[1]-1]+".pkl")
         cs2 = [c for c in cs2 if np.isnan(c.ftid) == 0] # Only care about tracks that existed in current month
     except: # For final month in series, forced to used active tracks for partial tabulation of events
         try:
-            cs2 = pd.read_pickle(inpath+"/ActiveTracks/"+str(mt[0])+"/"+BBoxNum+"activetracks"+str(mt[0])+mons[mt[1]-1]+".pkl")
+            cs2 = pd.read_pickle(inpath+"/ActiveTracks/"+str(mt[0])+"/"+subset+"activetracks"+str(mt[0])+md.dd[mt[1]-1]+".pkl")
             cs2, cs = md.cTrack2sTrack(cs2,cs,dateref,rg)
         except:
             cs2 = []
 
     # Limit to tracks that satisfy minimum lifespan and track length
-    trs = [c for c in cs if ((c.lifespan() > minls) and (c.trackLength() >= mintl) and (np.max(c.data.lat) >= minlat) and (c.maxDistFromGenPnt() >= mindisp))]
-    trs0 = [c for c in cs0 if ((c.lifespan() > minls) and (c.trackLength() >= mintl) and (np.max(c.data.lat) >= minlat) and (c.maxDistFromGenPnt() >= mindisp))]
-    trs2 = [c for c in cs2 if ((c.lifespan() > minls) and (c.trackLength() >= mintl) and (np.max(c.data.lat) >= minlat) and (c.maxDistFromGenPnt() >= mindisp))]
+    trs = [c for c in cs if ((c.lifespan() > minls) and (c.trackLength() >= mintl) and  (c.maxDistFromGenPnt() >= mindisp))]
+    trs0 = [c for c in cs0 if ((c.lifespan() > minls) and (c.trackLength() >= mintl) and (c.maxDistFromGenPnt() >= mindisp))]
+    trs2 = [c for c in cs2 if ((c.lifespan() > minls) and (c.trackLength() >= mintl) and (c.maxDistFromGenPnt() >= mindisp))]
 
     ### EVENT FIELDS ###
     # Limit events to only those tracks that satisfy above criteria
@@ -168,7 +164,7 @@ while mt != endtime:
         maxdepth.append( tr.data.depth.max() ), maxpgrad.append( tr.data.p_grad.max() )
         avgdsqp.append( tr.data.DsqP.mean() ), avgpgrad.append( tr.data.p_grad.mean() )
         avgp.append( tr.data.p_cent.mean() ), avgdepth.append( tr.data.depth.mean() )
-        lifespan.append( tr.lifespan() ), trlen.append( tr.trackLength() )
+        lifespan.append( tr.lifespan() ), trlen.append( tr.trackLength() ), maxarea.append( tr.data.area.max() )
         avgarea.append( tr.avgArea() ), mcc.append( tr.mcc() ), rge2.append( rge2_count )
         spl1.append( spl1_count ), spl2.append( spl2_count ), spl3.append( spl3_count )
         mrg1.append( mrg1_count ), mrg2.append( mrg2_count ), mrg3.append( mrg3_count )
@@ -182,14 +178,14 @@ if kind1 == 'System':
     pdf = pd.DataFrame({"sid":sid,"year":year,"month":month,"avguv":avguv,\
     "maxdsqp":maxdsqp,"minp":minp,"maxdepth":maxdepth,"maxpgrad":maxpgrad,\
     "avgdsqp":avgdsqp,"avgp":avgp,"avgdepth":avgdepth,"avgpgrad":avgpgrad,\
-    "lifespan":lifespan,"trlen":trlen,"avgarea":avgarea,"mcc":mcc,\
+    "lifespan":lifespan,"trlen":trlen,"avgarea":avgarea,"maxarea":maxarea,"mcc":mcc,\
     "spl1":spl1,"spl2":spl2,"spl3":spl3,"mrg1":mrg1,"mrg2":mrg2,"mrg3":mrg3,\
     "rge2":rge2,"genReg":genReg,"lysReg":lysReg})
 else:
     pdf = pd.DataFrame({"tid":tid,"year":year,"month":month,"avguv":avguv,\
     "maxdsqp":maxdsqp,"minp":minp,"maxdepth":maxdepth,"maxpgrad":maxpgrad,\
     "avgdsqp":avgdsqp,"avgp":avgp,"avgdepth":avgdepth,"avgpgrad":avgpgrad,\
-    "lifespan":lifespan,"trlen":trlen,"avgarea":avgarea,"mcc":mcc,\
+    "lifespan":lifespan,"trlen":trlen,"avgarea":avgarea,"maxarea":maxarea,"mcc":mcc,\
     "spl1":spl1,"spl2":spl2,"spl3":spl3,"mrg1":mrg1,"mrg2":mrg2,"mrg3":mrg3,\
     "rge2":rge2,"genReg":genReg,"lysReg":lysReg})
 
@@ -208,6 +204,7 @@ pdf['maxpgrad'] = pdf['maxpgrad']/100*1000*1000 # Pa/m --> hPa/[1000 km]
 pdf['avgdsqp'] = pdf['avgdsqp']/spres/spres*100 # Pa/gridcell^2 --> hPa/[100 km]^2 (1/100*100*100 = 100)
 pdf['maxdsqp'] = pdf['maxdsqp']/spres/spres*100 # Pa/gridcell^2 --> hPa/[100 km]^2 (1/100*100*100 = 100)
 pdf['avgarea'] = pdf['avgarea']*spres*spres # gridcell^2 --> km^2
+pdf['maxarea'] = pdf['maxarea']*spres*spres # gridcell^2 --> km^2
 
 # Write to File
 try:
@@ -217,4 +214,4 @@ except:
     os.chdir(inpath+"/Aggregation"+kind1)
 
 YY = str(starttime[0]) + "_" + str(md.timeAdd(endtime,[0,-1,0,0,0,0])[0])
-pdf.to_csv(BBoxNum+"_"+kind+"Events_"+version+"_"+YY+V+".csv",index=False)
+pdf.to_csv(subset+"_"+kind+"Events_"+version+"_"+YY+V+".csv",index=False)

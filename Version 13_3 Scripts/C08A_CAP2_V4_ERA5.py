@@ -7,6 +7,7 @@ Date Modified: 15 Oct 2021 --> Switch from original findCAP function to new find
             --> Additionally, records the propagation speed of the cyclone
             associated with the precipitation
             24 May 2023 --> Adapted to use pandas 1.0.1 and xarray (more efficient reprojection)
+            04 Feb 2025 --> Changed reprojection to make use of xesmf wrapping option; replaced np.int with int
 Purpose: Calculate cyclone-associated precipitation using ERA5 precip data and
 fields/tracks of cyclone from a cyclone detection an tracking algorithm.
 '''
@@ -20,7 +21,7 @@ import numpy as np
 import xesmf as xe
 import xarray as xr
 import netCDF4 as nc
-import CycloneModule_13_2 as md
+import CycloneModule_13_3 as md
 import warnings
 warnings.filterwarnings("ignore")
 
@@ -28,16 +29,17 @@ warnings.filterwarnings("ignore")
 Set up Environment
 *******************************************'''
 dataset = "ERA5"
-verd, vert = "13_2E5", "R"
-subset = "BBox10"
+verd, vert = "13test", "P"
+subset = ""
 typ = "System"
 
-cycpath = "/Volumes/Cressida/CycloneTracking/"
-precippath = "/Volumes/Prospero/"+dataset+"/Precipitation"
-outpath = "/Volumes/Prospero/"+dataset+"/CAP/tracking"+verd+vert+"/"+subset
+path = '/media/alex/Datapool'
+cycpath = path+"/CycloneTracking/"
+precippath = path+"/"+dataset+"/Precipitation"
+outpath = path+"/"+dataset+"/CAP/tracking"+verd+vert+"/"+subset
 
-cycprjpath = "/Volumes/Cressida/Projections"
-inprjpath = "/Volumes/Prospero/Projections/"+dataset+"_Projection.nc"
+cycprjpath = path+"/Projections"
+inprjpath = path+"/Projections/"+dataset+"_NH_Projection.nc"
 
 '''*******************************************
 Define Variables
@@ -45,10 +47,10 @@ Define Variables
 print("Defining variables")
 
 # Time Variables
-starttime = [1978,11,1,0,0,0] # Format: [Y,M,D,H,M,S] --> Note, first ERA5 valid time is 0700 UTC on 1 Jan 1979
-endtime = [1978,12,1,0,0,0] # stop BEFORE this time (exclusive)
+starttime = [1979,1,1,0,0,0] # Format: [Y,M,D,H,M,S] --> Note, first ERA5 valid time is 0700 UTC on 1 Jan 1979
+endtime = [1979,2,1,0,0,0] # stop BEFORE this time (exclusive)
 monthstep = [0,1,0,0,0,0] # A Time step that increases by 1 month [Y,M,D,H,M,S]
-timestep = [0,0,0,3,0,0] # Format: [Y,M,D,H,M,S] -- this is the time step of the cyclone data, not the precip data
+timestep = [0,0,0,6,0,0] # Format: [Y,M,D,H,M,S] -- this is the time step of the cyclone data, not the precip data
 
 dateref = [1900,1,1,0,0,0] # [Y,M,D,H,M,S]
 inittime = [1940,1,1,0,0,0] # time when cyclone detection dataset starts
@@ -86,11 +88,11 @@ except:
     inlon, inlat = inprj['longitude'][:].data, inprj['latitude'][:].data
 
 # Define Grids as Dictionaries
-grid_in = {'lon': np.c_[inlon,inlon[:,:1]], 'lat': np.c_[inlat,inlat[:,:1]]}
+grid_in = {'lon': inlon, 'lat': inlat}
 grid_out = {'lon': outlon, 'lat': outlat}
 
 # Create Regridder
-regridder = xe.Regridder(grid_in, grid_out, 'bilinear')
+regridder = xe.Regridder(grid_in, grid_out, 'bilinear', periodic=True)
 
 # Commence Main Loop (Monthly)
 mt = starttime
@@ -119,7 +121,7 @@ while mt != endtime:
     precipx = xr.open_dataset(precippath+"/ERA5_Precipitation_Hourly_"+Y+M+".nc", drop_variables=['sf'])
 
     # Reproject Precip File
-    precipx = regridder(xr.concat([precipx,precipx.isel(longitude=0)],dim='longitude'))
+    precipx = regridder(precipx)
 
     # Load Cyclone Fields
     cfs = pd.read_pickle(cycpath+"/detection"+verd+"/CycloneFields/CF"+Y+M+".pkl")
@@ -203,12 +205,12 @@ while mt != endtime:
     Augmented Radius: ''' + str(int(r/1000)) + '''km\n Output Units: ''' + str(precipnc['tp'].units) + " / " + str(timestep[3]) + ''' h'''
 
     # Create Dimension Variables
-    nctime = nc1.createVariable('time',np.int,('time'))
+    nctime = nc1.createVariable('time',int,('time'))
     nctime.units = precipnc['time'].units
     nctime[:] = times[::int(timestep[3])]
 
-    ncx = nc1.createVariable('x',np.int,('x'))
-    ncy = nc1.createVariable('y',np.int,('y'))
+    ncx = nc1.createVariable('x',int,('x'))
+    ncy = nc1.createVariable('y',int,('y'))
     ncx.units, ncy.units = 'm', 'm'
     try:
         ncx[:] = cycprj['x'][:].data
